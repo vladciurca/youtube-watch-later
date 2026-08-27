@@ -22,7 +22,7 @@ export function VideoList({ videos, loading, error, onReset }: VideoListProps) {
   if (error) {
     return (
       <div className="empty-state" role="alert">
-        <p>Could not load the Watch Later snapshot.</p>
+        <p>Could not load the Watch Later library.</p>
         <p className="empty-detail">{error}</p>
       </div>
     );

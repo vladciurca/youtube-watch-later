@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Watch Later Sync</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">Vlad · YouTube</p>
+      <h1>Watch Later Sync</h1>
+      <p class="lede">
+        Scrapes your logged-in Watch Later playlist. The site never marks a video
+        watched when you open it from the library.
+      </p>
+
+      <label>
+        Library URL
+        <input id="apiUrl" type="url" spellcheck="false" />
+      </label>
+      <label>
+        Sync secret
+        <input id="syncSecret" type="password" autocomplete="off" spellcheck="false" />
+      </label>
+
+      <button id="sync" type="button">Sync Watch Later</button>
+      <p id="status" role="status"></p>
+    </main>
+    <script src="popup.js" type="module"></script>
+  </body>
+</html>

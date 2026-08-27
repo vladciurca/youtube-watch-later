@@ -1,0 +1,77 @@
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  margin: 0;
+  width: 320px;
+  background: #101014;
+  color: #f2f2f5;
+  font: 13px/1.45 "Segoe UI", system-ui, sans-serif;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #6e6e78;
+}
+
+h1 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: -0.03em;
+}
+
+.lede,
+#status {
+  margin: 0;
+  color: #8c8c97;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #8c8c97;
+}
+
+input {
+  padding: 7px 8px;
+  border: 1px solid #23232c;
+  border-radius: 6px;
+  background: #0c0c10;
+  color: #f2f2f5;
+}
+
+button {
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: #e23d3d;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+#status.is-error {
+  color: #f0a43a;
+}
+
+#status.is-ok {
+  color: #3dd68c;
+}

@@ -33,6 +33,8 @@ export interface VideoLibrary {
   count: number;
   source: string;
   videos: Video[];
+  syncedAt?: string | null;
+  live?: boolean;
 }
 
 export interface LibraryFilters {

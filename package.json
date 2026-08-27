@@ -6,10 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "node scripts/validate-data.mjs && tsc -b && vite build",
+    "test": "node scripts/test-library.mjs",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "pack:extension": "node scripts/pack-extension.mjs"
   },
   "dependencies": {
+    "@vercel/blob": "^2.8.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

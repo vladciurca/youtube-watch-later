@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "api/sync.js": {
+      "includeFiles": "public/data/videos.json"
+    },
+    "api/library.js": {
+      "includeFiles": "public/data/videos.json"
+    }
+  }
+}

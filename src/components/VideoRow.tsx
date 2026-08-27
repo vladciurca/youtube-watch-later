@@ -43,6 +43,9 @@ export function VideoRow({ video }: VideoRowProps) {
           <span className={`status-pill ${STATUS_CLASS[video.status]}`}>
             {video.status}
           </span>
+          {video.droppedAt ? (
+            <span className="status-pill dropped">Dropped</span>
+          ) : null}
         </p>
         <div className="progress-row">
           <div

@@ -12,25 +12,49 @@ import type { LibraryFilters, SortKey, Video, VideoLibrary, WatchStatus } from "
 export default function App() {
   const [videos, setVideos] = useState<Video[]>([]);
   const [source, setSource] = useState<string | null>(null);
+  const [syncedAt, setSyncedAt] = useState<string | null>(null);
+  const [live, setLive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<LibraryFilters>(DEFAULT_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const loadLibrary = useCallback(async () => {
+    const apply = (data: VideoLibrary, fromLive: boolean) => {
+      setVideos(data.videos);
+      setSource(data.source);
+      setSyncedAt(data.syncedAt ?? null);
+      setLive(fromLive || data.live === true);
+      setError(null);
+    };
+
+    try {
+      const liveResponse = await fetch("/api/library", { cache: "no-store" });
+      if (liveResponse.ok) {
+        const liveData = (await liveResponse.json()) as VideoLibrary;
+        if (Array.isArray(liveData.videos) && liveData.videos.length > 0) {
+          apply(liveData, true);
+          return;
+        }
+      }
+    } catch {
+      // Seed JSON remains the fallback until the first successful sync.
+    }
+
+    const response = await fetch("/data/videos.json");
+    if (!response.ok) {
+      throw new Error(`Snapshot request failed (${response.status})`);
+    }
+    apply((await response.json()) as VideoLibrary, false);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       try {
-        const response = await fetch("/data/videos.json");
-        if (!response.ok) {
-          throw new Error(`Snapshot request failed (${response.status})`);
-        }
-        const data = (await response.json()) as VideoLibrary;
+        await loadLibrary();
         if (cancelled) return;
-        setVideos(data.videos);
-        setSource(data.source);
-        setError(null);
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "Unknown error");
@@ -43,7 +67,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadLibrary]);
 
   const visible = useMemo(
     () => filterAndSortVideos(videos, filters),
@@ -63,14 +87,23 @@ export default function App() {
     setFilters(DEFAULT_FILTERS);
   }, []);
 
-  const toggleStatus = useCallback((status: WatchStatus) => {
+  const selectStatus = useCallback((status: WatchStatus) => {
     setFilters((prev) => {
-      const selected = prev.statuses.includes(status)
-        ? prev.statuses.filter((item) => item !== status)
-        : [...prev.statuses, status];
-      return { ...prev, statuses: selected };
+      const already = prev.statuses.length === 1 && prev.statuses[0] === status;
+      return { ...prev, statuses: already ? [] : [status] };
     });
   }, []);
+
+  const refreshLibrary = useCallback(async () => {
+    setLoading(true);
+    try {
+      await loadLibrary();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  }, [loadLibrary]);
 
   return (
     <div className={`app${filtersOpen ? " filters-open" : ""}`}>
@@ -78,7 +111,8 @@ export default function App() {
         filters={filters}
         counts={counts}
         resultCount={visible.length}
-        onToggleStatus={toggleStatus}
+        onSelectStatus={selectStatus}
+        live={live}
         onToggleDropped={() =>
           setFilters((prev) => ({ ...prev, includeDropped: !prev.includeDropped }))
         }
@@ -95,9 +129,13 @@ export default function App() {
       <div className="main">
         <Header
           matchCount={loading ? null : visible.length}
+          totalCount={videos.length}
           source={source}
+          syncedAt={syncedAt}
+          live={live}
           filtersOpen={filtersOpen}
           onToggleFilters={() => setFiltersOpen((open) => !open)}
+          onRefresh={() => void refreshLibrary()}
         />
         <VideoList
           videos={visible}

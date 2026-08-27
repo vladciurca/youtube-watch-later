@@ -1,23 +1,63 @@
 # YouTube Watch Later
 
-A local library for **Vlad Ciurca**'s YouTube Watch Later queue. Browse 665 saved videos the way you browse X likes: filter by watch status and Tech/Business, sort, search, and click to resume on YouTube.
+A local library for **Vlad Ciurca**'s YouTube Watch Later queue. Filter by watch status and Tech/Business, sort, search, and click to resume on YouTube.
 
-This is **v0**. The app reads a committed snapshot. There is no live YouTube scrape, no sheet writes, and clicking a video does **not** mark it watched.
+GitHub is the source of truth. Vercel auto-deploys from `main`.
 
-## Data snapshot
+## Live progress (v1)
 
-Vendored at `public/data/videos.json`.
+YouTube's API does not expose Watch Later or watch percent. The live path is:
 
-- Source: **Vlad Youtube watchlater sheet 2026-08-27**
-- 665 unique videos
-- Runtime never fetches the original export URL; the committed file is the source of truth
+1. Logged-in Chrome extension scrapes `youtube.com/playlist?list=WL`
+2. POST upserts into **this** project's store by YouTube video id
+3. The Vercel site reads that store
 
-To refresh later, replace `public/data/videos.json` with a new export of the same shape.
+The Google Sheet is **seed only** (`public/data/videos.json`, 2026-08-27, 665 videos + Tech/Business tags). The app never writes progress back to the sheet and never rereads it at runtime.
+
+Opening a video in the library does **not** mark it watched. Progress updates only after you watch on YouTube and run **Sync Watch Later**.
+
+Until the first successful sync, the site shows the committed seed snapshot.
+
+## Chrome extension
+
+See [extension/README.md](extension/README.md) for Load unpacked steps.
+
+Short version:
+
+1. `chrome://extensions` → Developer mode → **Load unpacked** → select `extension/`
+2. Set the sync secret (same as Vercel `SYNC_SECRET`)
+3. Click **Sync Watch Later**
+4. Refresh the site
+
+Videos that disappear from Watch Later keep their last snapshot and get `droppedAt`. The **Dropped** filter then lists them.
+
+New Watch Later videos that were not in the seed land with `techBusiness: false`. Seed tags are preserved on upsert.
+
+Status is recomputed from watched percent:
+
+| Watched % | Status |
+| --- | --- |
+| 90+ | Almost finished |
+| 40–89 | Partially watched |
+| 10–39 | Barely started |
+| 0–9 | Not started |
+
+`remainingSec = durationSec * (1 - watchedPct / 100)`. Resume `t` comes from playlist progress.
+
+## Vercel env (Hobby)
+
+Create a **Blob** store on the project (Storage → Blob). Then set:
+
+- `SYNC_SECRET` — required on `POST /api/sync` via `X-Sync-Secret`
+- `BLOB_READ_WRITE_TOKEN` — added automatically by the Blob store
+
+No new paid database. Seed JSON stays the public fallback.
 
 ## Local run
 
 ```bash
 npm install
+npm test
 npm run dev
 ```
 
@@ -28,14 +68,16 @@ npm run build
 npm run preview
 ```
 
+`/api/*` is served on Vercel. Locally the UI falls back to `public/data/videos.json`.
+
 ## Default view
 
-- Status: **Almost finished** only
+- Status: **Almost finished** only (single-select chips; click another status to switch immediately; click the selected chip to show all)
 - Topic: **Tech / Business** on
-- Sort: **Remaining** (least remaining first)
+- Sort: **Remaining** — least leftover time among videos that are not done (`remainingSec > 0`) first; Done / 100% last. **Watched %** still sorts highest `watchedPct` first
 
-Click a row to open `https://www.youtube.com/watch?v={id}&t={t}s` in a new tab. Opening a video does not change `watchedPct` or `status`.
+Click a row to open `https://www.youtube.com/watch?v={id}&t={t}s` in a new tab. That click does not change `watchedPct` or `status`.
 
-## Out of scope (v0)
+## Out of scope
 
-Live scrape, Google Sheet writes, auth, and marking videos watched on click.
+Backend scrapes that use your YouTube cookies, sheet writes, Origin mirroring, and public-library auth. The write API is secret-header protected; the library itself stays public.
