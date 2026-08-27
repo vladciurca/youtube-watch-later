@@ -46,7 +46,9 @@ Status is recomputed from watched percent:
 
 ## Vercel env (Hobby)
 
-Create a **Blob** store on the project (Storage → Blob). Then set:
+Create a **Blob** store on the project (Storage → Blob). Private stores work: `/api/sync` writes with `access: "private"` and `/api/library` reads through the Blob SDK (or a `BLOB_READ_WRITE_TOKEN` bearer request), not a public URL.
+
+Then set:
 
 - `SYNC_SECRET` — required on `POST /api/sync` via `X-Sync-Secret`
 - `BLOB_READ_WRITE_TOKEN` — added automatically by the Blob store

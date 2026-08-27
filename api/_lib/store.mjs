@@ -3,37 +3,71 @@ import { join } from "node:path";
 
 const BLOB_PATH = "watch-later/library.json";
 
-async function blobApi() {
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!token) return null;
+// Private Blob stores reject access:"public" puts, and blob URLs are not
+// anonymously fetchable. Authenticate list/put/get with BLOB_READ_WRITE_TOKEN.
+
+function blobToken() {
+  return process.env.BLOB_READ_WRITE_TOKEN || "";
+}
+
+async function blobSdk(override) {
+  if (override) return override;
   return import("@vercel/blob");
 }
 
-export async function loadLiveLibrary() {
-  const blob = await blobApi();
-  if (!blob) return null;
+async function readPrivateJson(sdk, urlOrPath, token) {
+  if (typeof sdk.get === "function") {
+    const result = await sdk.get(urlOrPath, {
+      access: "private",
+      token,
+      useCache: false,
+    });
+    if (result?.statusCode !== 200 || !result.stream) return null;
+    return new Response(result.stream).json();
+  }
 
-  const { blobs } = await blob.list({ prefix: BLOB_PATH, limit: 10 });
-  const match = blobs.find((item) => item.pathname === BLOB_PATH);
-  if (!match?.url) return null;
-
-  const response = await fetch(match.url, { cache: "no-store" });
+  const response = await fetch(urlOrPath, {
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${token}` },
+  });
   if (!response.ok) return null;
   return response.json();
 }
 
-export async function saveLiveLibrary(library) {
-  const blob = await blobApi();
-  if (!blob) {
+export async function loadLiveLibrary(sdkOverride) {
+  const token = blobToken();
+  if (!token) return null;
+
+  const sdk = await blobSdk(sdkOverride);
+  const { blobs } = await sdk.list({
+    prefix: BLOB_PATH,
+    limit: 10,
+    token,
+  });
+  const match = blobs.find((item) => item.pathname === BLOB_PATH);
+  if (!match) return null;
+
+  try {
+    return await readPrivateJson(sdk, match.url || BLOB_PATH, token);
+  } catch {
+    return null;
+  }
+}
+
+export async function saveLiveLibrary(library, sdkOverride) {
+  const token = blobToken();
+  if (!token) {
     throw new Error("BLOB_READ_WRITE_TOKEN is not configured");
   }
 
-  await blob.put(BLOB_PATH, JSON.stringify(library), {
-    access: "public",
+  const sdk = await blobSdk(sdkOverride);
+  await sdk.put(BLOB_PATH, JSON.stringify(library), {
+    access: "private",
+    token,
     addRandomSuffix: false,
     allowOverwrite: true,
     contentType: "application/json",
-    cacheControlMaxAge: 0,
+    cacheControlMaxAge: 60,
   });
 }
 
@@ -52,8 +86,8 @@ export async function loadSeedLibrary(req) {
   }
 }
 
-export async function loadExistingLibrary(req) {
-  const live = await loadLiveLibrary();
+export async function loadExistingLibrary(req, sdkOverride) {
+  const live = await loadLiveLibrary(sdkOverride);
   if (live?.videos?.length) return live;
   return loadSeedLibrary(req);
 }
