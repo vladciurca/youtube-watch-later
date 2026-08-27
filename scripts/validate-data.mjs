@@ -8,6 +8,7 @@ const STATUSES = [
   "Barely started",
   "Not started",
 ];
+const CATEGORIES = ["tech", "health", "dating", "trailers", "travel", "other"];
 
 const path = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -29,6 +30,7 @@ if (unique.size !== ids.length) {
 if (ids.some((id) => !id)) errors.push("missing video id");
 
 const statusCounts = Object.fromEntries(STATUSES.map((s) => [s, 0]));
+const categoryCounts = Object.fromEntries(CATEGORIES.map((c) => [c, 0]));
 let tech = 0;
 for (const video of data.videos) {
   if (!STATUSES.includes(video.status)) {
@@ -36,7 +38,15 @@ for (const video of data.videos) {
   } else {
     statusCounts[video.status] += 1;
   }
+  if (!CATEGORIES.includes(video.category)) {
+    errors.push(`unexpected category ${video.category} on ${video.id}`);
+  } else {
+    categoryCounts[video.category] += 1;
+  }
   if (video.techBusiness) tech += 1;
+  if (video.techBusiness !== (video.category === "tech")) {
+    errors.push(`techBusiness/category mismatch on ${video.id}`);
+  }
   const expected = video.durationSec * (1 - video.watchedPct / 100);
   if (Math.abs(expected - video.remainingSec) > 0.51) {
     errors.push(`remainingSec mismatch on ${video.id}`);
@@ -55,10 +65,27 @@ for (const [status, expected] of Object.entries(expectedStatuses)) {
   }
 }
 if (tech !== 490) errors.push(`techBusiness true: ${tech} (expected 490)`);
+if (categoryCounts.tech !== 490) {
+  errors.push(`category tech: ${categoryCounts.tech} (expected 490)`);
+}
+if (categoryCounts.health < 15) {
+  errors.push(`category health: ${categoryCounts.health} (expected at least 15)`);
+}
+if (categoryCounts.dating < 15) {
+  errors.push(`category dating: ${categoryCounts.dating} (expected at least 15)`);
+}
+if (categoryCounts.trailers < 8) {
+  errors.push(`category trailers: ${categoryCounts.trailers} (expected at least 8)`);
+}
+if (categoryCounts.travel < 8) {
+  errors.push(`category travel: ${categoryCounts.travel} (expected at least 8)`);
+}
 
 if (errors.length) {
   console.error("videos.json failed validation:\n" + errors.join("\n"));
   process.exit(1);
 }
 
-console.log("videos.json: 665 videos, statuses and remainingSec ok");
+console.log(
+  "videos.json: 665 videos, statuses, remainingSec, and categories ok",
+);

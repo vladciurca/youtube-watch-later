@@ -1,5 +1,11 @@
-import type { LibraryFilters, SortKey, Video, WatchStatus } from "../types";
-import { WATCH_STATUSES } from "../types";
+import type {
+  LibraryFilters,
+  SortKey,
+  Video,
+  VideoCategory,
+  WatchStatus,
+} from "../types";
+import { VIDEO_CATEGORIES, WATCH_STATUSES } from "../types";
 
 export const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "saved", label: "Saved" },
@@ -11,10 +17,19 @@ export const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "author", label: "Author" },
 ];
 
+export const CATEGORY_OPTIONS: { key: VideoCategory; label: string }[] = [
+  { key: "tech", label: "Tech / Business" },
+  { key: "health", label: "Health / longevity" },
+  { key: "dating", label: "Dating / relationships" },
+  { key: "trailers", label: "Trailers" },
+  { key: "travel", label: "Travel / packing" },
+  { key: "other", label: "Other" },
+];
+
 export const DEFAULT_FILTERS: LibraryFilters = {
   statuses: ["Almost finished"],
   includeDropped: false,
-  techBusinessOnly: true,
+  categories: ["tech"],
   query: "",
   sort: "saved",
 };
@@ -45,6 +60,13 @@ export function publishedDisplay(video: Pick<Video, "publishedLabel" | "publishe
   return date.toLocaleDateString(undefined, { dateStyle: "medium" });
 }
 
+export function videoCategory(video: Video): VideoCategory {
+  if (video.category && (VIDEO_CATEGORIES as readonly string[]).includes(video.category)) {
+    return video.category;
+  }
+  return video.techBusiness ? "tech" : "other";
+}
+
 function matchesQuery(video: Video, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
@@ -54,8 +76,9 @@ function matchesQuery(video: Video, query: string): boolean {
   );
 }
 
-function matchesTech(video: Video, techBusinessOnly: boolean): boolean {
-  return !techBusinessOnly || video.techBusiness;
+function matchesCategory(video: Video, categories: VideoCategory[]): boolean {
+  if (categories.length === 0) return true;
+  return categories.includes(videoCategory(video));
 }
 
 function matchesStatus(
@@ -71,7 +94,7 @@ function matchesStatus(
 
 export function statusCounts(
   videos: Video[],
-  filters: Pick<LibraryFilters, "techBusinessOnly" | "query">,
+  filters: Pick<LibraryFilters, "categories" | "query">,
 ): Record<WatchStatus | "Dropped", number> {
   const counts: Record<WatchStatus | "Dropped", number> = {
     "Almost finished": 0,
@@ -82,12 +105,29 @@ export function statusCounts(
   };
 
   for (const video of videos) {
-    if (!matchesTech(video, filters.techBusinessOnly)) continue;
+    if (!matchesCategory(video, filters.categories)) continue;
     if (!matchesQuery(video, filters.query)) continue;
     if (WATCH_STATUSES.includes(video.status)) {
       counts[video.status] += 1;
     }
     if (video.droppedAt != null) counts.Dropped += 1;
+  }
+
+  return counts;
+}
+
+export function categoryCounts(
+  videos: Video[],
+  filters: Pick<LibraryFilters, "query">,
+): Record<VideoCategory, number> {
+  const counts = Object.fromEntries(VIDEO_CATEGORIES.map((key) => [key, 0])) as Record<
+    VideoCategory,
+    number
+  >;
+
+  for (const video of videos) {
+    if (!matchesQuery(video, filters.query)) continue;
+    counts[videoCategory(video)] += 1;
   }
 
   return counts;
@@ -158,7 +198,7 @@ export function filterAndSortVideos(
     .filter(
       (video) =>
         matchesStatus(video, filters.statuses, filters.includeDropped) &&
-        matchesTech(video, filters.techBusinessOnly) &&
+        matchesCategory(video, filters.categories) &&
         matchesQuery(video, filters.query),
     )
     .sort((a, b) => compareVideos(a, b, filters.sort));

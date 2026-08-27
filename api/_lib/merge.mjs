@@ -1,4 +1,7 @@
-import { majorityTechChannels, resolveTechBusiness } from "./categorize.mjs";
+import {
+  majorityChannelsByCategory,
+  resolveCategory,
+} from "./categorize.mjs";
 import {
   formatDuration,
   normalizeScrapedVideo,
@@ -14,7 +17,7 @@ export function mergeWatchLaterLibrary(existingVideos, scrapedVideos, syncedAt) 
     if (video?.id) previous.set(video.id, video);
   }
 
-  const techChannels = majorityTechChannels(existingVideos);
+  const channelMaps = majorityChannelsByCategory(existingVideos);
   const seen = new Set();
   const videos = [];
 
@@ -35,6 +38,8 @@ export function mergeWatchLaterLibrary(existingVideos, scrapedVideos, syncedAt) 
       formatDuration(durationSec);
     const publishedAt = scraped.publishedAt || prev?.publishedAt || null;
     const publishedLabel = scraped.publishedLabel || prev?.publishedLabel || null;
+    const category = resolveCategory(prev, { title, author }, channelMaps);
+    const techBusiness = category === "tech";
 
     videos.push({
       id: scraped.id,
@@ -44,7 +49,8 @@ export function mergeWatchLaterLibrary(existingVideos, scrapedVideos, syncedAt) 
       durationSec,
       watchedPct,
       status: statusFromWatchedPct(watchedPct),
-      techBusiness: resolveTechBusiness(prev, { title, author }, techChannels),
+      techBusiness,
+      category,
       t: resumeTimeFrom(durationSec, watchedPct, scraped.t),
       url: `https://www.youtube.com/watch?v=${scraped.id}`,
       remainingSec: remainingSecFrom(durationSec, watchedPct),

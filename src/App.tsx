@@ -4,10 +4,18 @@ import { Sidebar } from "./components/Sidebar";
 import { VideoList } from "./components/VideoList";
 import {
   DEFAULT_FILTERS,
+  categoryCounts,
   filterAndSortVideos,
   statusCounts,
 } from "./lib/library";
-import type { LibraryFilters, SortKey, Video, VideoLibrary, WatchStatus } from "./types";
+import type {
+  LibraryFilters,
+  SortKey,
+  Video,
+  VideoCategory,
+  VideoLibrary,
+  WatchStatus,
+} from "./types";
 
 export default function App() {
   const [videos, setVideos] = useState<Video[]>([]);
@@ -77,10 +85,15 @@ export default function App() {
   const counts = useMemo(
     () =>
       statusCounts(videos, {
-        techBusinessOnly: filters.techBusinessOnly,
+        categories: filters.categories,
         query: filters.query,
       }),
-    [videos, filters.techBusinessOnly, filters.query],
+    [videos, filters.categories, filters.query],
+  );
+
+  const topicCounts = useMemo(
+    () => categoryCounts(videos, { query: filters.query }),
+    [videos, filters.query],
   );
 
   const resetFilters = useCallback(() => {
@@ -91,6 +104,13 @@ export default function App() {
     setFilters((prev) => {
       const already = prev.statuses.length === 1 && prev.statuses[0] === status;
       return { ...prev, statuses: already ? [] : [status] };
+    });
+  }, []);
+
+  const selectCategory = useCallback((category: VideoCategory) => {
+    setFilters((prev) => {
+      const already = prev.categories.length === 1 && prev.categories[0] === category;
+      return { ...prev, categories: already ? [] : [category] };
     });
   }, []);
 
@@ -110,18 +130,14 @@ export default function App() {
       <Sidebar
         filters={filters}
         counts={counts}
+        categoryCounts={topicCounts}
         resultCount={visible.length}
         onSelectStatus={selectStatus}
         live={live}
         onToggleDropped={() =>
           setFilters((prev) => ({ ...prev, includeDropped: !prev.includeDropped }))
         }
-        onToggleTech={() =>
-          setFilters((prev) => ({
-            ...prev,
-            techBusinessOnly: !prev.techBusinessOnly,
-          }))
-        }
+        onSelectCategory={selectCategory}
         onQueryChange={(query) => setFilters((prev) => ({ ...prev, query }))}
         onSortChange={(sort: SortKey) => setFilters((prev) => ({ ...prev, sort }))}
         onReset={resetFilters}

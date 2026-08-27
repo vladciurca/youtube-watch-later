@@ -9,7 +9,7 @@ import {
   remainingSecFrom,
   statusFromWatchedPct,
 } from "../api/_lib/progress.mjs";
-import { classifyTechBusiness, majorityTechChannels, resolveTechBusiness } from "../api/_lib/categorize.mjs";
+import { classifyCategory, classifyTechBusiness, majorityTechChannels, resolveCategory, resolveTechBusiness } from "../api/_lib/categorize.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const seed = JSON.parse(
@@ -55,6 +55,8 @@ assert.deepEqual(selectStatus(["Almost finished"], "Partially watched"), [
 ]);
 assert.deepEqual(selectStatus(["Almost finished"], "Almost finished"), []);
 assert.deepEqual(selectStatus([], "Barely started"), ["Barely started"]);
+assert.deepEqual(selectStatus(["tech"], "health"), ["health"]);
+assert.deepEqual(selectStatus(["tech"], "tech"), []);
 
 // Remaining vs Watched % on the default Almost finished + Tech/Business view
 const defaultView = seed.videos.filter(
@@ -133,6 +135,7 @@ assert.equal(stats.dropped, 1);
 const byId = Object.fromEntries(library.videos.map((video) => [video.id, video]));
 
 assert.equal(byId[returning.id].techBusiness, returning.techBusiness);
+assert.equal(byId[returning.id].category, returning.techBusiness ? "tech" : returning.category);
 assert.equal(byId[returning.id].status, "Partially watched");
 assert.equal(byId[returning.id].droppedAt, null);
 assert.equal(byId[returning.id].remainingSec, remainingSecFrom(returning.durationSec, 55));
@@ -140,6 +143,7 @@ assert.equal(byId[sample[1].id].status, "Barely started");
 assert.equal(byId[missing.id].droppedAt, syncedAt);
 assert.equal(byId[missing.id].title, missing.title);
 assert.equal(byId.AAAAAAAAAAA.techBusiness, false);
+assert.equal(byId.AAAAAAAAAAA.category, "other");
 assert.equal(byId.AAAAAAAAAAA.status, "Not started");
 assert.equal(library.live, true);
 assert.equal(library.syncedAt, syncedAt);
@@ -322,10 +326,65 @@ const { library: categorized } = mergeWatchLaterLibrary(
 );
 const catById = Object.fromEntries(categorized.videos.map((video) => [video.id, video]));
 assert.equal(catById.ycvid000001.techBusiness, true);
+assert.equal(catById.ycvid000001.category, "tech");
 assert.equal(catById.lexvid00001.techBusiness, false);
 assert.equal(catById.newycvideo1.techBusiness, true);
+assert.equal(catById.newycvideo1.category, "tech");
 assert.equal(catById.keywordvid1.techBusiness, true);
 assert.equal(catById.piano000001.techBusiness, false);
+assert.equal(catById.piano000001.category, "other");
+
+assert.equal(
+  classifyCategory({ title: "Is Sauna ACTUALLY Good For You?", author: "Bryan Johnson" }),
+  "health",
+);
+assert.equal(
+  classifyCategory({ title: "This is Why Modern Dating Is Failing", author: "Scott Galloway" }),
+  "dating",
+);
+assert.equal(
+  classifyCategory({ title: "Echo Valley — Official Trailer | Apple TV", author: "Apple TV" }),
+  "trailers",
+);
+assert.equal(
+  classifyCategory({ title: "10 Packable Backpacks for Minimalist Travel", author: "Pack Hacker" }),
+  "travel",
+);
+assert.equal(
+  resolveCategory(
+    { techBusiness: true, category: "tech" },
+    { title: "Sauna and sleep protocol", author: "Bryan Johnson" },
+    {},
+  ),
+  "tech",
+);
+assert.equal(
+  resolveCategory(
+    { techBusiness: false },
+    { title: "How I FIXED My Terrible Sleep", author: "Bryan Johnson" },
+    {},
+  ),
+  "health",
+);
+
+const { library: moreCats } = mergeWatchLaterLibrary(
+  taggedLibrary,
+  [
+    vid("healthvid01", { title: "Sauna protocol", author: "Bryan Johnson" }),
+    vid("datevid0001", { title: "A Divorce Attorney's Thoughts On Love", author: "James Sexton" }),
+    vid("trailvid001", { title: "Crime 101 | Official Trailer", author: "Amazon MGM Studios" }),
+    vid("packvid0001", { title: "5 Things Experienced Travelers Don't Pack", author: "Pack Hacker" }),
+  ],
+  syncedAt,
+);
+const moreById = Object.fromEntries(moreCats.videos.map((video) => [video.id, video]));
+assert.equal(moreById.healthvid01.category, "health");
+assert.equal(moreById.datevid0001.category, "dating");
+assert.equal(moreById.trailvid001.category, "trailers");
+assert.equal(moreById.packvid0001.category, "travel");
+
+assert.match(libraryTs, /categories: \["tech"\]/);
+assert.match(libraryTs, /label: "Health \/ longevity"/);
 
 assert.equal(formatRemaining(0), "Done");
 assert.equal(formatRemaining(360), "6:00 left");
