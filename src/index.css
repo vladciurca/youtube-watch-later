@@ -299,8 +299,9 @@ p {
   top: 0;
   z-index: 2;
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 16px;
+  gap: 10px 16px;
   padding: 16px 22px 14px;
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   backdrop-filter: blur(10px);
@@ -334,6 +335,40 @@ p {
 .source {
   font-size: 12px;
   color: var(--faint);
+}
+
+.sync-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.refresh-btn {
+  padding: 5px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: #17171d;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.refresh-btn:hover {
+  color: var(--text);
+  border-color: #3d3d4a;
+}
+
+.sync-hint {
+  width: 100%;
+  margin: 0;
+  font-size: 12px;
+  color: var(--faint);
+  line-height: 1.4;
+}
+
+.sync-hint.is-stale {
+  color: #d0a36a;
 }
 
 .list {
@@ -432,6 +467,9 @@ p {
 }
 .status-pill.notstarted {
   color: var(--notstarted);
+}
+.status-pill.dropped {
+  color: var(--dropped);
 }
 
 .progress-row {
@@ -572,5 +610,9 @@ p {
 
   .source {
     display: none;
+  }
+
+  .sync-hint {
+    font-size: 11px;
   }
 }

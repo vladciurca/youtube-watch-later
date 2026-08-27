@@ -6,7 +6,8 @@ interface SidebarProps {
   filters: LibraryFilters;
   counts: Record<WatchStatus | "Dropped", number>;
   resultCount: number;
-  onToggleStatus: (status: WatchStatus) => void;
+  onSelectStatus: (status: WatchStatus) => void;
+  live: boolean;
   onToggleDropped: () => void;
   onToggleTech: () => void;
   onQueryChange: (query: string) => void;
@@ -44,7 +45,8 @@ export function Sidebar({
   filters,
   counts,
   resultCount,
-  onToggleStatus,
+  onSelectStatus,
+  live,
   onToggleDropped,
   onToggleTech,
   onQueryChange,
@@ -54,7 +56,7 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <p className="eyebrow">YouTube · snapshot</p>
+        <p className="eyebrow">{live ? "YouTube · live" : "YouTube · snapshot"}</p>
         <h1>Watch Later</h1>
         <p className="owner">Vlad Ciurca</p>
       </div>
@@ -73,7 +75,7 @@ export function Sidebar({
               label={status}
               count={counts[status]}
               selected={filters.statuses.includes(status)}
-              onClick={() => onToggleStatus(status)}
+              onClick={() => onSelectStatus(status)}
               tone={toneForStatus(status)}
             />
           ))}
@@ -136,7 +138,12 @@ export function Sidebar({
       </section>
 
       <p className="sidebar-foot">
-        {resultCount} showing · {filters.sort === "remaining" ? "least remaining first" : "sorted"}
+        {resultCount} showing ·{" "}
+        {filters.sort === "remaining"
+          ? "least leftover first, Done last"
+          : filters.sort === "watchedPct"
+            ? "highest watched % first"
+            : "sorted"}
       </p>
     </aside>
   );

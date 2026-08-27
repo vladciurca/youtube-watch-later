@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Watch Later Sync",
+  "version": "1.0.0",
+  "description": "Scrape YouTube Watch Later progress while logged in, then upsert Vlad's library.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Sync Watch Later"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["storage", "tabs", "scripting"],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://youtube.com/*",
+    "https://youtube-watch-later.vercel.app/*",
+    "https://*.vercel.app/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "icons": {
+    "16": "icons/16.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  }
+}

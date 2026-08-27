@@ -1,8 +1,6 @@
 import type { LibraryFilters, SortKey, Video, WatchStatus } from "../types";
 import { WATCH_STATUSES } from "../types";
 
-export const TOTAL_VIDEOS = 665;
-
 export const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "remaining", label: "Remaining" },
   { key: "watchedPct", label: "Watched %" },
@@ -85,10 +83,18 @@ export function statusCounts(
   return counts;
 }
 
+function isDone(video: Video): boolean {
+  return video.remainingSec <= 0;
+}
+
 function compareVideos(a: Video, b: Video, sort: SortKey): number {
   switch (sort) {
-    case "remaining":
+    case "remaining": {
+      const aDone = isDone(a);
+      const bDone = isDone(b);
+      if (aDone !== bDone) return aDone ? 1 : -1;
       return a.remainingSec - b.remainingSec || a.title.localeCompare(b.title);
+    }
     case "watchedPct":
       return b.watchedPct - a.watchedPct || a.title.localeCompare(b.title);
     case "duration":
