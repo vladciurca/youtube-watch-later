@@ -8,6 +8,7 @@ export const WATCH_STATUSES = [
 export type WatchStatus = (typeof WATCH_STATUSES)[number];
 
 export type SortKey =
+  | "saved"
   | "remaining"
   | "watchedPct"
   | "duration"
@@ -27,6 +28,8 @@ export interface Video {
   url: string;
   remainingSec: number;
   droppedAt: string | null;
+  /** 0 = top of YouTube Watch Later (newest saved). Absent on the unsynced seed. */
+  savedRank?: number | null;
 }
 
 export interface VideoLibrary {

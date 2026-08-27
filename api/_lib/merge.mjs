@@ -19,6 +19,7 @@ export function mergeWatchLaterLibrary(existingVideos, scrapedVideos, syncedAt) 
     const scraped = normalizeScrapedVideo(raw);
     if (!scraped || seen.has(scraped.id)) continue;
     seen.add(scraped.id);
+    const savedRank = seen.size - 1;
 
     const prev = previous.get(scraped.id);
     const durationSec = scraped.durationSec || prev?.durationSec || 0;
@@ -43,6 +44,7 @@ export function mergeWatchLaterLibrary(existingVideos, scrapedVideos, syncedAt) 
       url: `https://www.youtube.com/watch?v=${scraped.id}`,
       remainingSec: remainingSecFrom(durationSec, watchedPct),
       droppedAt: null,
+      savedRank,
     });
   }
 

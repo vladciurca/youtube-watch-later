@@ -2,6 +2,7 @@ import type { LibraryFilters, SortKey, Video, WatchStatus } from "../types";
 import { WATCH_STATUSES } from "../types";
 
 export const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: "saved", label: "Saved" },
   { key: "remaining", label: "Remaining" },
   { key: "watchedPct", label: "Watched %" },
   { key: "duration", label: "Duration" },
@@ -14,7 +15,7 @@ export const DEFAULT_FILTERS: LibraryFilters = {
   includeDropped: false,
   techBusinessOnly: true,
   query: "",
-  sort: "remaining",
+  sort: "saved",
 };
 
 export function youtubeResumeUrl(video: Video): string {
@@ -87,14 +88,36 @@ function isDone(video: Video): boolean {
   return video.remainingSec <= 0;
 }
 
+function hasSavedRank(video: Video): boolean {
+  return Number.isFinite(video.savedRank);
+}
+
+function compareRemaining(a: Video, b: Video): number {
+  const aDone = isDone(a);
+  const bDone = isDone(b);
+  if (aDone !== bDone) return aDone ? 1 : -1;
+  return a.remainingSec - b.remainingSec || a.title.localeCompare(b.title);
+}
+
+function compareSaved(a: Video, b: Video): number {
+  const aRanked = hasSavedRank(a);
+  const bRanked = hasSavedRank(b);
+  if (!aRanked && !bRanked) return compareRemaining(a, b);
+
+  const aDropped = a.droppedAt != null;
+  const bDropped = b.droppedAt != null;
+  if (aDropped !== bDropped) return aDropped ? 1 : -1;
+
+  if (aRanked !== bRanked) return aRanked ? -1 : 1;
+  return (a.savedRank as number) - (b.savedRank as number) || a.title.localeCompare(b.title);
+}
+
 function compareVideos(a: Video, b: Video, sort: SortKey): number {
   switch (sort) {
-    case "remaining": {
-      const aDone = isDone(a);
-      const bDone = isDone(b);
-      if (aDone !== bDone) return aDone ? 1 : -1;
-      return a.remainingSec - b.remainingSec || a.title.localeCompare(b.title);
-    }
+    case "saved":
+      return compareSaved(a, b);
+    case "remaining":
+      return compareRemaining(a, b);
     case "watchedPct":
       return b.watchedPct - a.watchedPct || a.title.localeCompare(b.title);
     case "duration":
