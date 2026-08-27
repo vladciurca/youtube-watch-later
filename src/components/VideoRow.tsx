@@ -1,5 +1,10 @@
 import type { Video, WatchStatus } from "../types";
-import { formatRemaining, thumbnailUrl, youtubeResumeUrl } from "../lib/library";
+import {
+  formatRemaining,
+  publishedDisplay,
+  thumbnailUrl,
+  youtubeResumeUrl,
+} from "../lib/library";
 
 interface VideoRowProps {
   video: Video;
@@ -14,6 +19,7 @@ const STATUS_CLASS: Record<WatchStatus, string> = {
 
 export function VideoRow({ video }: VideoRowProps) {
   const pct = Math.min(100, Math.max(0, video.watchedPct));
+  const published = publishedDisplay(video);
 
   return (
     <a
@@ -37,6 +43,14 @@ export function VideoRow({ video }: VideoRowProps) {
         <h3 className="video-title">{video.title}</h3>
         <p className="video-meta">
           <span>{video.author}</span>
+          {published ? (
+            <>
+              <span className="dot" aria-hidden="true">
+                ·
+              </span>
+              <span className="published">{published}</span>
+            </>
+          ) : null}
           <span className="dot" aria-hidden="true">
             ·
           </span>

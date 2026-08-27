@@ -450,6 +450,10 @@ p {
   color: var(--faint);
 }
 
+.published {
+  color: var(--muted);
+}
+
 .status-pill {
   font-size: 11px;
   font-weight: 500;

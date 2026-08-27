@@ -14,20 +14,23 @@ function streamFrom(value) {
   return new Blob([JSON.stringify(value)], { type: "application/json" }).stream();
 }
 
-function mockSdk({ onList, onGet, onPut } = {}) {
+function mockSdk({ onList, onGet, onPut, getImpl, listImpl } = {}) {
   return {
     async list(options) {
       onList?.(options);
+      if (listImpl) return listImpl(options);
       return {
         blobs: [{ pathname: BLOB_PATH, url: BLOB_URL }],
       };
     },
     async get(urlOrPath, options) {
       onGet?.(urlOrPath, options);
+      if (getImpl) return getImpl(urlOrPath, options);
       return { statusCode: 200, stream: streamFrom(library) };
     },
     async put(pathname, body, options) {
       onPut?.(pathname, body, options);
+      return { pathname, url: BLOB_URL };
     },
   };
 }
@@ -66,14 +69,12 @@ globalThis.fetch = async (url, options = {}) => {
 try {
   const loaded = await loadLiveLibrary(sdk);
   assert.deepEqual(loaded, library);
-  assert.equal(listCalls.length, 1);
-  assert.equal(listCalls[0].token, TOKEN);
-  assert.equal(listCalls[0].prefix, BLOB_PATH);
   assert.equal(getCalls.length, 1);
-  assert.equal(getCalls[0].urlOrPath, BLOB_URL);
+  assert.equal(getCalls[0].urlOrPath, BLOB_PATH);
   assert.equal(getCalls[0].options.access, "private");
   assert.equal(getCalls[0].options.token, TOKEN);
   assert.equal(getCalls[0].options.useCache, false);
+  assert.equal(listCalls.length, 0, "successful get(pathname) must not require list()");
 
   await saveLiveLibrary(library, sdk);
   assert.equal(putCalls.length, 1);
@@ -87,6 +88,32 @@ try {
   const existing = await loadExistingLibrary(undefined, sdk);
   assert.equal(existing.live, true);
   assert.equal(unauthenticatedFetch, 0);
+
+  const getThenList = [];
+  const listed = await loadLiveLibrary(
+    mockSdk({
+      getImpl: async (urlOrPath) => {
+        getThenList.push(urlOrPath);
+        if (urlOrPath === BLOB_PATH) return null;
+        return { statusCode: 200, stream: streamFrom(library) };
+      },
+      listImpl: async () => ({
+        blobs: [
+          {
+            pathname: "watch-later/library-abc123.json",
+            url: `${BLOB_URL}-abc123`,
+            uploadedAt: "2026-08-27T20:00:00.000Z",
+          },
+        ],
+      }),
+      onList: (options) => {
+        assert.equal(options.token, TOKEN);
+        assert.equal(options.prefix, "watch-later/");
+      },
+    }),
+  );
+  assert.deepEqual(listed, library);
+  assert.deepEqual(getThenList, [BLOB_PATH, "watch-later/library-abc123.json"]);
 
   const fetchOnlySdk = {
     async list(options) {
@@ -110,10 +137,18 @@ try {
   const viaBearer = await loadLiveLibrary(fetchOnlySdk);
   assert.deepEqual(viaBearer, library);
   assert.equal(bearerFetch, 1);
+
+  const v2NotFound = await loadLiveLibrary(
+    mockSdk({
+      getImpl: async () => null,
+      listImpl: async () => ({ blobs: [] }),
+    }),
+  );
+  assert.equal(v2NotFound, null);
 } finally {
   globalThis.fetch = originalFetch;
   if (previousToken === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
   else process.env.BLOB_READ_WRITE_TOKEN = previousToken;
 }
 
-console.log("store tests: private put/list/get token auth ok");
+console.log("store tests: private put + get(pathname) without list, list fallback, bearer ok");

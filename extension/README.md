@@ -26,5 +26,5 @@ You can also unzip `extension/watch-later-sync.zip` and load that folder the sam
 
 1. Stay signed into YouTube in Chrome
 2. Click **Sync Watch Later**
-3. The extension opens or focuses the Watch Later playlist, reads progress bars / Innertube percent, and upserts by video id
+3. The extension opens or focuses the Watch Later playlist, reads the WL playlist contents (not a generic tree-walk), Innertube/DOM `playlistVideoRenderer.index`, progress bars, and `publishedTimeText` / videoInfo dates, then upserts by video id
 4. Refresh the site. Videos gone from Watch Later keep their last snapshot and appear under **Dropped**

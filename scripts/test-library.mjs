@@ -4,9 +4,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mergeWatchLaterLibrary } from "../api/_lib/merge.mjs";
 import {
+  formatRemaining,
+  parsePublishedRelative,
   remainingSecFrom,
   statusFromWatchedPct,
 } from "../api/_lib/progress.mjs";
+import { classifyTechBusiness, majorityTechChannels, resolveTechBusiness } from "../api/_lib/categorize.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const seed = JSON.parse(
@@ -207,4 +210,131 @@ assert.deepEqual([...ranked].sort(compareSaved).map((video) => video.id), [
   "d",
 ]);
 
-console.log("library tests: exclusive chips, remaining sort, upsert, dropped, savedRank ok");
+const vid = (id, extra = {}) => ({
+  id,
+  title: extra.title || id,
+  author: extra.author || "Channel",
+  durationSec: extra.durationSec ?? 120,
+  duration: extra.duration || "2:00",
+  watchedPct: extra.watchedPct ?? 0,
+  ...extra,
+});
+
+// savedRank from playlistVideoRenderer.index (1-based → 0-based), not scrape insertion order
+const { library: fromIndex } = mergeWatchLaterLibrary(
+  [],
+  [
+    vid("ccccccccccc", { title: "Third", index: 3 }),
+    vid("aaaaaaaaaaa", { title: "First", index: 1 }),
+    vid("bbbbbbbbbbb", { title: "Second", savedRank: 1 }),
+  ],
+  syncedAt,
+);
+const fromIndexById = Object.fromEntries(fromIndex.videos.map((video) => [video.id, video]));
+assert.equal(fromIndexById.aaaaaaaaaaa.savedRank, 0);
+assert.equal(fromIndexById.bbbbbbbbbbb.savedRank, 1);
+assert.equal(fromIndexById.ccccccccccc.savedRank, 2);
+
+// publishedAt parse at scrape/merge time; preserve previous if a later scrape omits it
+const now = Date.parse("2026-08-27T20:00:00.000Z");
+assert.equal(
+  parsePublishedRelative("4 weeks ago", now),
+  new Date(now - 4 * 7 * 86_400_000).toISOString(),
+);
+assert.equal(
+  parsePublishedRelative("Streamed 5 hours ago", now),
+  new Date(now - 5 * 3_600_000).toISOString(),
+);
+assert.equal(parsePublishedRelative("not a date", now), null);
+
+const { library: withPublished } = mergeWatchLaterLibrary(
+  [],
+  [vid("ddddddddddd", { publishedTimeText: "4 weeks ago" })],
+  syncedAt,
+);
+assert.equal(withPublished.videos[0].publishedLabel, "4 weeks ago");
+assert.ok(withPublished.videos[0].publishedAt);
+assert.equal(
+  withPublished.videos[0].publishedAt,
+  parsePublishedRelative("4 weeks ago", Date.parse(withPublished.videos[0].publishedAt) + 4 * 7 * 86_400_000),
+);
+
+const { library: omittedPublished } = mergeWatchLaterLibrary(
+  withPublished.videos,
+  [vid("ddddddddddd")],
+  "2026-08-27T21:00:00.000Z",
+);
+assert.equal(omittedPublished.videos[0].publishedAt, withPublished.videos[0].publishedAt);
+assert.equal(omittedPublished.videos[0].publishedLabel, "4 weeks ago");
+
+function comparePublished(a, b) {
+  const aTime = Date.parse(a.publishedAt || "");
+  const bTime = Date.parse(b.publishedAt || "");
+  const aOk = Number.isFinite(aTime);
+  const bOk = Number.isFinite(bTime);
+  if (aOk !== bOk) return aOk ? -1 : 1;
+  if (!aOk && !bOk) return a.title.localeCompare(b.title);
+  return bTime - aTime || a.title.localeCompare(b.title);
+}
+const publishedSorted = [
+  { id: "old", title: "Old", publishedAt: "2024-01-01T00:00:00.000Z" },
+  { id: "new", title: "New", publishedAt: "2026-08-01T00:00:00.000Z" },
+  { id: "missing", title: "Missing", publishedAt: null },
+].sort(comparePublished);
+assert.deepEqual(publishedSorted.map((video) => video.id), ["new", "old", "missing"]);
+
+// Categorize new/untagged from channel majority + keywords; keep existing tags
+const taggedLibrary = [
+  { id: "ycvid000001", title: "YC talk", author: "Y Combinator", techBusiness: true },
+  { id: "ycvid000002", title: "Another YC", author: "Y Combinator", techBusiness: true },
+  { id: "lexvid00001", title: "Chat", author: "Lex Fridman", techBusiness: false },
+];
+const channels = majorityTechChannels(taggedLibrary);
+assert.equal(channels.has("y combinator"), true);
+assert.equal(channels.has("lex fridman"), false);
+assert.equal(classifyTechBusiness({ title: "Hello", author: "Y Combinator" }, channels), true);
+assert.equal(classifyTechBusiness({ title: "Raising a SaaS round", author: "Unknown" }, channels), true);
+assert.equal(classifyTechBusiness({ title: "Piano practice", author: "Someone" }, channels), false);
+
+assert.equal(
+  resolveTechBusiness({ techBusiness: false }, { title: "AI startup", author: "Y Combinator" }, channels),
+  false,
+);
+assert.equal(
+  resolveTechBusiness({ techBusiness: true }, { title: "Cooking", author: "Lex Fridman" }, channels),
+  true,
+);
+assert.equal(
+  resolveTechBusiness(undefined, { title: "New YC video", author: "Y Combinator" }, channels),
+  true,
+);
+
+const { library: categorized } = mergeWatchLaterLibrary(
+  taggedLibrary,
+  [
+    vid("ycvid000001", { title: "YC talk", author: "Y Combinator", watchedPct: 10 }),
+    vid("lexvid00001", { title: "Chat", author: "Lex Fridman", watchedPct: 10 }),
+    vid("newycvideo1", { title: "Office Hours", author: "Y Combinator" }),
+    vid("keywordvid1", { title: "How we built our SaaS", author: "New Channel" }),
+    vid("piano000001", { title: "Piano practice", author: "Someone" }),
+  ],
+  syncedAt,
+);
+const catById = Object.fromEntries(categorized.videos.map((video) => [video.id, video]));
+assert.equal(catById.ycvid000001.techBusiness, true);
+assert.equal(catById.lexvid00001.techBusiness, false);
+assert.equal(catById.newycvideo1.techBusiness, true);
+assert.equal(catById.keywordvid1.techBusiness, true);
+assert.equal(catById.piano000001.techBusiness, false);
+
+assert.equal(formatRemaining(0), "Done");
+assert.equal(formatRemaining(360), "6:00 left");
+assert.equal(formatRemaining(6), "0:06 left");
+assert.equal(formatRemaining(3840), "1h 4m left");
+assert.equal(formatRemaining(3600), "1h left");
+assert.match(libraryTs, /\$\{m\}:\$\{String\(s\)\.padStart\(2, "0"\)\} left/);
+assert.match(libraryTs, /key: "published", label: "Published"/);
+
+console.log(
+  "library tests: exclusive chips, remaining sort, upsert, dropped, savedRank, publishedAt, categorize, formatRemaining ok",
+);

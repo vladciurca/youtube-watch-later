@@ -10,6 +10,7 @@ export type WatchStatus = (typeof WATCH_STATUSES)[number];
 export type SortKey =
   | "saved"
   | "remaining"
+  | "published"
   | "watchedPct"
   | "duration"
   | "title"
@@ -30,6 +31,10 @@ export interface Video {
   droppedAt: string | null;
   /** 0 = top of YouTube Watch Later (newest saved). Absent on the unsynced seed. */
   savedRank?: number | null;
+  /** ISO timestamp parsed from YouTube's relative published string at scrape time. */
+  publishedAt?: string | null;
+  /** Original YouTube relative string, e.g. "4 weeks ago". */
+  publishedLabel?: string | null;
 }
 
 export interface VideoLibrary {

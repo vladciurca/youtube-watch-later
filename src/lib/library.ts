@@ -4,6 +4,7 @@ import { WATCH_STATUSES } from "../types";
 export const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "saved", label: "Saved" },
   { key: "remaining", label: "Remaining" },
+  { key: "published", label: "Published" },
   { key: "watchedPct", label: "Watched %" },
   { key: "duration", label: "Duration" },
   { key: "title", label: "Title" },
@@ -31,9 +32,17 @@ export function formatRemaining(seconds: number): string {
   if (sec === 0) return "Done";
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
   if (h > 0) return m > 0 ? `${h}h ${m}m left` : `${h}h left`;
-  if (m > 0) return `${m}m left`;
-  return `${sec}s left`;
+  return `${m}:${String(s).padStart(2, "0")} left`;
+}
+
+export function publishedDisplay(video: Pick<Video, "publishedLabel" | "publishedAt">): string {
+  if (video.publishedLabel) return video.publishedLabel;
+  if (!video.publishedAt) return "";
+  const date = new Date(video.publishedAt);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString(undefined, { dateStyle: "medium" });
 }
 
 function matchesQuery(video: Video, query: string): boolean {
@@ -112,12 +121,24 @@ function compareSaved(a: Video, b: Video): number {
   return (a.savedRank as number) - (b.savedRank as number) || a.title.localeCompare(b.title);
 }
 
+function comparePublished(a: Video, b: Video): number {
+  const aTime = Date.parse(a.publishedAt || "");
+  const bTime = Date.parse(b.publishedAt || "");
+  const aOk = Number.isFinite(aTime);
+  const bOk = Number.isFinite(bTime);
+  if (aOk !== bOk) return aOk ? -1 : 1;
+  if (!aOk && !bOk) return a.title.localeCompare(b.title);
+  return bTime - aTime || a.title.localeCompare(b.title);
+}
+
 function compareVideos(a: Video, b: Video, sort: SortKey): number {
   switch (sort) {
     case "saved":
       return compareSaved(a, b);
     case "remaining":
       return compareRemaining(a, b);
+    case "published":
+      return comparePublished(a, b);
     case "watchedPct":
       return b.watchedPct - a.watchedPct || a.title.localeCompare(b.title);
     case "duration":

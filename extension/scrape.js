@@ -1,5 +1,16 @@
 (() => {
   const WL_URL = "https://www.youtube.com/playlist?list=WL";
+  const RELATIVE_DATE_RE =
+    /(?:(?:streamed|premiered)\s+)?(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago/i;
+  const UNIT_MS = {
+    second: 1000,
+    minute: 60_000,
+    hour: 3_600_000,
+    day: 86_400_000,
+    week: 7 * 86_400_000,
+    month: 30 * 86_400_000,
+    year: 365 * 86_400_000,
+  };
 
   function textOf(node) {
     if (!node) return "";
@@ -25,6 +36,42 @@
     return parts[0];
   }
 
+  function extractRelativePublished(text) {
+    if (typeof text !== "string") return "";
+    const match = text.match(RELATIVE_DATE_RE);
+    return match ? match[0].trim() : "";
+  }
+
+  function parsePublishedRelative(text, now = Date.now()) {
+    if (typeof text !== "string") return null;
+    const cleaned = text.trim();
+    if (!cleaned) return null;
+    if (/^just now$/i.test(cleaned)) return new Date(now).toISOString();
+    const match = cleaned.match(RELATIVE_DATE_RE);
+    if (!match) return null;
+    const n = Number(match[1]);
+    const unit = match[2].toLowerCase();
+    const ms = UNIT_MS[unit];
+    if (!Number.isFinite(n) || n < 0 || !ms) return null;
+    return new Date(now - n * ms).toISOString();
+  }
+
+  function publishedFromRenderer(renderer) {
+    const direct = textOf(renderer.publishedTimeText).trim();
+    if (extractRelativePublished(direct)) return extractRelativePublished(direct);
+    const fromInfo = extractRelativePublished(textOf(renderer.videoInfo));
+    if (fromInfo) return fromInfo;
+    const label = renderer.title?.accessibility?.accessibilityData?.label || "";
+    return extractRelativePublished(label);
+  }
+
+  function savedRankFromRenderer(renderer) {
+    const indexText = textOf(renderer.index).trim();
+    const fromIndex = Number.parseInt(indexText, 10);
+    if (Number.isFinite(fromIndex) && fromIndex >= 1) return fromIndex - 1;
+    return null;
+  }
+
   function watchedPctFromRenderer(renderer) {
     const overlays = renderer.thumbnailOverlays;
     if (Array.isArray(overlays)) {
@@ -42,6 +89,10 @@
     const durationText = textOf(renderer.lengthText);
     const durationSec = Number(renderer.lengthSeconds) || parseDuration(durationText);
     const start = renderer.navigationEndpoint?.watchEndpoint?.startTimeSeconds;
+    const publishedLabel = publishedFromRenderer(renderer);
+    const savedRank = savedRankFromRenderer(renderer);
+    const indexText = textOf(renderer.index).trim();
+    const index = Number.parseInt(indexText, 10);
     return {
       id,
       title: textOf(renderer.title),
@@ -53,28 +104,68 @@
       durationSec,
       watchedPct: watchedPctFromRenderer(renderer),
       t: Number.isFinite(Number(start)) ? Number(start) : undefined,
+      savedRank,
+      index: Number.isFinite(index) && index >= 1 ? index : undefined,
+      publishedLabel: publishedLabel || null,
+      publishedTimeText: publishedLabel || null,
+      publishedAt: parsePublishedRelative(publishedLabel),
     };
   }
 
-  function findPlaylistContents(root) {
-    if (!root || typeof root !== "object") return null;
-    if (Array.isArray(root.playlistVideoListRenderer?.contents)) {
-      return root.playlistVideoListRenderer.contents;
+  function isWatchLaterPlaylist(renderer) {
+    if (!renderer || !Array.isArray(renderer.contents)) return false;
+    if (renderer.playlistId === "WL") return true;
+    for (const item of renderer.contents) {
+      const playlistId =
+        item?.playlistVideoRenderer?.navigationEndpoint?.watchEndpoint?.playlistId;
+      if (playlistId === "WL") return true;
     }
-    if (Array.isArray(root)) {
-      for (const item of root) {
-        const found = findPlaylistContents(item);
-        if (found) return found;
-      }
-      return null;
-    }
-    for (const value of Object.values(root)) {
-      if (value && typeof value === "object") {
-        const found = findPlaylistContents(value);
-        if (found) return found;
+    return false;
+  }
+
+  function browsePlaylistContents(root) {
+    const tabs = root?.contents?.twoColumnBrowseResultsRenderer?.tabs;
+    if (!Array.isArray(tabs)) return null;
+    for (const tab of tabs) {
+      const sections = tab?.tabRenderer?.content?.sectionListRenderer?.contents;
+      if (!Array.isArray(sections)) continue;
+      for (const section of sections) {
+        const items = section?.itemSectionRenderer?.contents;
+        if (!Array.isArray(items)) continue;
+        for (const item of items) {
+          const renderer = item?.playlistVideoListRenderer;
+          if (isWatchLaterPlaylist(renderer)) return renderer.contents;
+        }
       }
     }
     return null;
+  }
+
+  function findWatchLaterContents(root) {
+    const fromBrowse = browsePlaylistContents(root);
+    if (fromBrowse) return fromBrowse;
+
+    const matches = [];
+    const seen = new Set();
+    const stack = [root];
+    while (stack.length) {
+      const node = stack.pop();
+      if (!node || typeof node !== "object") continue;
+      if (seen.has(node)) continue;
+      seen.add(node);
+      const renderer = node.playlistVideoListRenderer;
+      if (isWatchLaterPlaylist(renderer)) {
+        matches.push(renderer.contents);
+        continue;
+      }
+      const kids = Array.isArray(node) ? node : Object.values(node);
+      for (const child of kids) {
+        if (child && typeof child === "object") stack.push(child);
+      }
+    }
+    if (matches.length === 0) return null;
+    matches.sort((a, b) => b.length - a.length);
+    return matches[0];
   }
 
   function continuationToken(node) {
@@ -99,9 +190,8 @@
     return next;
   }
 
-  function collectFromBrowse(payload, videos) {
-    const contents = findPlaylistContents(payload);
-    let next = collectFromItems(contents, videos);
+  function collectContinuations(payload, videos) {
+    let next = null;
     const received =
       payload?.onResponseReceivedActions ||
       payload?.onResponseReceivedEndpoints ||
@@ -116,6 +206,23 @@
     return next;
   }
 
+  function collectInitial(payload, videos) {
+    const contents = findWatchLaterContents(payload);
+    let next = collectFromItems(contents, videos);
+    const continued = collectContinuations(payload, videos);
+    return continued || next;
+  }
+
+  function finalizeRanks(videos) {
+    videos.forEach((video, i) => {
+      if (!Number.isFinite(video.savedRank) || video.savedRank < 0) {
+        video.savedRank = i;
+      }
+    });
+    videos.sort((a, b) => a.savedRank - b.savedRank || a.title.localeCompare(b.title));
+    return videos;
+  }
+
   async function scrapeInnertube() {
     const ytcfg = window.ytcfg;
     const initial = window.ytInitialData;
@@ -127,7 +234,7 @@
 
     const videos = [];
     const seen = new Set();
-    let continuation = collectFromBrowse(initial, videos);
+    let continuation = collectInitial(initial, videos);
     for (const video of videos) seen.add(video.id);
 
     let guard = 0;
@@ -145,7 +252,7 @@
       if (!response.ok) break;
       const payload = await response.json();
       const batch = [];
-      continuation = collectFromBrowse(payload, batch);
+      continuation = collectContinuations(payload, batch);
       for (const video of batch) {
         if (seen.has(video.id)) continue;
         seen.add(video.id);
@@ -154,7 +261,7 @@
     }
 
     if (videos.length === 0) return null;
-    return { videos, method: "innertube" };
+    return { videos: finalizeRanks(videos), method: "innertube" };
   }
 
   function progressFromRow(row) {
@@ -178,6 +285,26 @@
     }
   }
 
+  function publishedFromRow(row) {
+    const info =
+      row.querySelector("#video-info")?.innerText ||
+      row.querySelector("yt-formatted-string#video-info")?.textContent ||
+      row.querySelector("ytd-video-meta-block")?.innerText ||
+      row.querySelector(".yt-content-metadata-view-model")?.innerText ||
+      "";
+    return extractRelativePublished(info) || extractRelativePublished(row.innerText || "");
+  }
+
+  function savedRankFromRow(row, fallback) {
+    const indexText =
+      row.querySelector("#index")?.textContent?.trim() ||
+      row.querySelector("#index-container")?.textContent?.trim() ||
+      "";
+    const fromIndex = Number.parseInt(indexText, 10);
+    if (Number.isFinite(fromIndex) && fromIndex >= 1) return fromIndex - 1;
+    return fallback;
+  }
+
   async function scrapeDom() {
     const seen = new Map();
     let stagnant = 0;
@@ -194,6 +321,8 @@
         const duration =
           row.querySelector("ytd-thumbnail-overlay-time-status-renderer #text")
             ?.textContent?.trim() || "";
+        const publishedLabel = publishedFromRow(row);
+        const savedRank = savedRankFromRow(row, seen.size);
         seen.set(id, {
           id,
           title: row.querySelector("#video-title")?.textContent?.trim() || "",
@@ -204,6 +333,11 @@
           duration,
           durationSec: parseDuration(duration),
           watchedPct: progressFromRow(row),
+          savedRank,
+          index: Number.isFinite(savedRank) ? savedRank + 1 : undefined,
+          publishedLabel: publishedLabel || null,
+          publishedTimeText: publishedLabel || null,
+          publishedAt: parsePublishedRelative(publishedLabel),
         });
       }
       if (seen.size === before) stagnant += 1;
@@ -213,7 +347,7 @@
     }
     const videos = [...seen.values()];
     if (videos.length === 0) return null;
-    return { videos, method: "dom" };
+    return { videos: finalizeRanks(videos), method: "dom" };
   }
 
   function signedOut() {

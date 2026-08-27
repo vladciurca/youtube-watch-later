@@ -31,9 +31,11 @@ Short version:
 
 Videos that disappear from Watch Later keep their last snapshot and get `droppedAt`. The **Dropped** filter then lists them.
 
-Sync records `savedRank` from Watch Later playlist order (0 = newest / top of the YT list). Dropped videos keep their last rank and sort last under **Saved**.
+Sync records `savedRank` from Watch Later playlist order (`playlistVideoRenderer.index`, stored 0-based so 0 = newest / top of the YT list). Continuations append in that same playlist order. Dropped videos keep their last rank and sort last under **Saved**.
 
-New Watch Later videos that were not in the seed land with `techBusiness: false`. Seed tags are preserved on upsert.
+New Watch Later videos are tagged at sync time from the title + channel: majority Tech/Business channels already in the library, plus keywords (AI, startup, VC, YC, SaaS, investing, and similar). Videos that already have a `techBusiness` tag from the sheet or a previous library keep that tag. Default is `false` when unsure. The Google Sheet is never reread.
+
+Each row shows the YouTube published date (`publishedTimeText` / "4 weeks ago"), parsed to ISO at scrape time. **Published** sorts newest first; videos without a date sort last. Later scrapes that omit a date keep the previous `publishedAt`.
 
 Status is recomputed from watched percent:
 
@@ -48,7 +50,7 @@ Status is recomputed from watched percent:
 
 ## Vercel env (Hobby)
 
-Create a **Blob** store on the project (Storage → Blob). Private stores work: `/api/sync` writes with `access: "private"` and `/api/library` reads through the Blob SDK (or a `BLOB_READ_WRITE_TOKEN` bearer request), not a public URL.
+Create a **Blob** store on the project (Storage → Blob). Private stores work: `/api/sync` writes with `access: "private"` and `/api/library` reads with `@vercel/blob` `get(pathname)` (v2 returns `null` on 404; `useCache: false` bypasses CDN). If `get` is unavailable, it falls back to `list` plus a `BLOB_READ_WRITE_TOKEN` bearer request, never a public fetch.
 
 Then set:
 
@@ -78,7 +80,7 @@ npm run preview
 
 - Status: **Almost finished** only (single-select chips; click another status to switch immediately; click the selected chip to show all)
 - Topic: **Tech / Business** on
-- Sort: **Saved** — YouTube Watch Later order, newest saved first (`savedRank` 0 is the top of the YT list). Until the first sync, the seed has no rank and **Saved** falls back to **Remaining**. **Remaining** still sorts least leftover time among unfinished videos first, Done / 100% last. **Watched %** still sorts highest `watchedPct` first
+- Sort: **Saved** — YouTube Watch Later order, newest saved first (`savedRank` 0 is the top of the YT list). Until the first sync, the seed has no rank and **Saved** falls back to **Remaining**. **Remaining** still sorts least leftover time among unfinished videos first, Done / 100% last. Leftover under an hour shows `M:SS` (e.g. `6:00 left`); hours stay `1h 4m left`. **Published** sorts newest upload first, missing dates last. **Watched %** still sorts highest `watchedPct` first
 
 Click a row to open `https://www.youtube.com/watch?v={id}&t={t}s` in a new tab. That click does not change `watchedPct` or `status`.
 

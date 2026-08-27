@@ -145,9 +145,11 @@ export function Sidebar({
             : "no WL rank yet; leftover time until first sync"
           : filters.sort === "remaining"
             ? "least leftover first, Done last"
-            : filters.sort === "watchedPct"
-              ? "highest watched % first"
-              : "sorted"}
+            : filters.sort === "published"
+              ? "newest publish date first"
+              : filters.sort === "watchedPct"
+                ? "highest watched % first"
+                : "sorted"}
       </p>
     </aside>
   );
