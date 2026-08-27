@@ -31,6 +31,8 @@ Short version:
 
 Videos that disappear from Watch Later keep their last snapshot and get `droppedAt`. The **Dropped** filter then lists them.
 
+Sync records `savedRank` from Watch Later playlist order (0 = newest / top of the YT list). Dropped videos keep their last rank and sort last under **Saved**.
+
 New Watch Later videos that were not in the seed land with `techBusiness: false`. Seed tags are preserved on upsert.
 
 Status is recomputed from watched percent:
@@ -46,7 +48,9 @@ Status is recomputed from watched percent:
 
 ## Vercel env (Hobby)
 
-Create a **Blob** store on the project (Storage → Blob). Then set:
+Create a **Blob** store on the project (Storage → Blob). Private stores work: `/api/sync` writes with `access: "private"` and `/api/library` reads through the Blob SDK (or a `BLOB_READ_WRITE_TOKEN` bearer request), not a public URL.
+
+Then set:
 
 - `SYNC_SECRET` — required on `POST /api/sync` via `X-Sync-Secret`
 - `BLOB_READ_WRITE_TOKEN` — added automatically by the Blob store
@@ -74,7 +78,7 @@ npm run preview
 
 - Status: **Almost finished** only (single-select chips; click another status to switch immediately; click the selected chip to show all)
 - Topic: **Tech / Business** on
-- Sort: **Remaining** — least leftover time among videos that are not done (`remainingSec > 0`) first; Done / 100% last. **Watched %** still sorts highest `watchedPct` first
+- Sort: **Saved** — YouTube Watch Later order, newest saved first (`savedRank` 0 is the top of the YT list). Until the first sync, the seed has no rank and **Saved** falls back to **Remaining**. **Remaining** still sorts least leftover time among unfinished videos first, Done / 100% last. **Watched %** still sorts highest `watchedPct` first
 
 Click a row to open `https://www.youtube.com/watch?v={id}&t={t}s` in a new tab. That click does not change `watchedPct` or `status`.
 

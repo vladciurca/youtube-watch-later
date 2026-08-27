@@ -29,6 +29,23 @@ function compareWatched(a, b) {
   return b.watchedPct - a.watchedPct || a.title.localeCompare(b.title);
 }
 
+function hasSavedRank(video) {
+  return Number.isFinite(video.savedRank);
+}
+
+function compareSaved(a, b) {
+  const aRanked = hasSavedRank(a);
+  const bRanked = hasSavedRank(b);
+  if (!aRanked && !bRanked) return compareRemaining(a, b);
+
+  const aDropped = a.droppedAt != null;
+  const bDropped = b.droppedAt != null;
+  if (aDropped !== bDropped) return aDropped ? 1 : -1;
+
+  if (aRanked !== bRanked) return aRanked ? -1 : 1;
+  return a.savedRank - b.savedRank || a.title.localeCompare(b.title);
+}
+
 // Exclusive status chips
 assert.deepEqual(selectStatus(["Almost finished"], "Partially watched"), [
   "Partially watched",
@@ -123,5 +140,71 @@ assert.equal(byId.AAAAAAAAAAA.techBusiness, false);
 assert.equal(byId.AAAAAAAAAAA.status, "Not started");
 assert.equal(library.live, true);
 assert.equal(library.syncedAt, syncedAt);
+assert.equal(byId[returning.id].savedRank, 0);
+assert.equal(byId[sample[1].id].savedRank, 1);
+assert.equal(byId.AAAAAAAAAAA.savedRank, 2);
+assert.equal(byId[missing.id].savedRank, undefined);
 
-console.log("library tests: exclusive chips, remaining sort, upsert, dropped ok");
+const resorted = [
+  scraped[2],
+  scraped[0],
+  scraped[1],
+];
+const { library: reranked } = mergeWatchLaterLibrary(
+  library.videos,
+  resorted,
+  "2026-08-27T21:00:00.000Z",
+);
+const rerankedById = Object.fromEntries(
+  reranked.videos.map((video) => [video.id, video]),
+);
+assert.equal(rerankedById.AAAAAAAAAAA.savedRank, 0);
+assert.equal(rerankedById[returning.id].savedRank, 1);
+assert.equal(rerankedById[sample[1].id].savedRank, 2);
+assert.equal(rerankedById[missing.id].savedRank, undefined);
+assert.equal(rerankedById[missing.id].droppedAt, syncedAt);
+
+const { library: afterDrop } = mergeWatchLaterLibrary(
+  reranked.videos,
+  [resorted[0], resorted[1]],
+  "2026-08-27T22:00:00.000Z",
+);
+const afterDropById = Object.fromEntries(
+  afterDrop.videos.map((video) => [video.id, video]),
+);
+assert.equal(afterDropById.AAAAAAAAAAA.savedRank, 0);
+assert.equal(afterDropById[returning.id].savedRank, 1);
+assert.equal(afterDropById[sample[1].id].savedRank, 2);
+assert.equal(afterDropById[sample[1].id].droppedAt, "2026-08-27T22:00:00.000Z");
+
+const libraryTs = readFileSync(join(root, "../src/lib/library.ts"), "utf8");
+assert.match(libraryTs, /key: "saved", label: "Saved"/);
+assert.match(libraryTs, /sort: "saved"/);
+
+const seedSaved = [...seed.videos].sort(compareSaved);
+const seedRemaining = [...seed.videos].sort(compareRemaining);
+assert.deepEqual(
+  seedSaved.map((video) => video.id),
+  seedRemaining.map((video) => video.id),
+);
+
+const ranked = [
+  { id: "c", title: "Oldest", remainingSec: 5, savedRank: 2, droppedAt: null },
+  { id: "a", title: "Newest", remainingSec: 40, savedRank: 0, droppedAt: null },
+  { id: "b", title: "Middle", remainingSec: 1, savedRank: 1, droppedAt: null },
+  {
+    id: "d",
+    title: "Dropped old top",
+    remainingSec: 10,
+    savedRank: 0,
+    droppedAt: "2026-08-27T22:00:00.000Z",
+  },
+];
+assert.deepEqual([...ranked].sort(compareSaved).map((video) => video.id), [
+  "a",
+  "b",
+  "c",
+  "d",
+]);
+
+console.log("library tests: exclusive chips, remaining sort, upsert, dropped, savedRank ok");
