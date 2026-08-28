@@ -7,9 +7,27 @@ export const WATCH_STATUSES = [
 
 export type WatchStatus = (typeof WATCH_STATUSES)[number];
 
+export type VideoCategory =
+  | "tech"
+  | "health"
+  | "dating"
+  | "trailers"
+  | "travel"
+  | "other";
+
+export const VIDEO_CATEGORIES = [
+  "tech",
+  "health",
+  "dating",
+  "trailers",
+  "travel",
+  "other",
+] as const;
+
 export type SortKey =
   | "saved"
   | "remaining"
+  | "published"
   | "watchedPct"
   | "duration"
   | "title"
@@ -24,12 +42,18 @@ export interface Video {
   watchedPct: number;
   status: WatchStatus;
   techBusiness: boolean;
+  /** Primary topic. `tech` stays aligned with sheet `techBusiness: true`. */
+  category?: VideoCategory;
   t: number;
   url: string;
   remainingSec: number;
   droppedAt: string | null;
   /** 0 = top of YouTube Watch Later (newest saved). Absent on the unsynced seed. */
   savedRank?: number | null;
+  /** ISO timestamp parsed from YouTube's relative published string at scrape time. */
+  publishedAt?: string | null;
+  /** Original YouTube relative string, e.g. "4 weeks ago". */
+  publishedLabel?: string | null;
 }
 
 export interface VideoLibrary {
@@ -43,7 +67,7 @@ export interface VideoLibrary {
 export interface LibraryFilters {
   statuses: WatchStatus[];
   includeDropped: boolean;
-  techBusinessOnly: boolean;
+  categories: VideoCategory[];
   query: string;
   sort: SortKey;
 }

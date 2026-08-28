@@ -1,19 +1,35 @@
-import type { LibraryFilters, SortKey, Video, WatchStatus } from "../types";
-import { WATCH_STATUSES } from "../types";
+import type {
+  LibraryFilters,
+  SortKey,
+  Video,
+  VideoCategory,
+  WatchStatus,
+} from "../types";
+import { VIDEO_CATEGORIES, WATCH_STATUSES } from "../types";
 
 export const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "saved", label: "Saved" },
   { key: "remaining", label: "Remaining" },
+  { key: "published", label: "Published" },
   { key: "watchedPct", label: "Watched %" },
   { key: "duration", label: "Duration" },
   { key: "title", label: "Title" },
   { key: "author", label: "Author" },
 ];
 
+export const CATEGORY_OPTIONS: { key: VideoCategory; label: string }[] = [
+  { key: "tech", label: "Tech / Business" },
+  { key: "health", label: "Health / longevity" },
+  { key: "dating", label: "Dating / relationships" },
+  { key: "trailers", label: "Trailers" },
+  { key: "travel", label: "Travel / packing" },
+  { key: "other", label: "Other" },
+];
+
 export const DEFAULT_FILTERS: LibraryFilters = {
   statuses: ["Almost finished"],
   includeDropped: false,
-  techBusinessOnly: true,
+  categories: ["tech"],
   query: "",
   sort: "saved",
 };
@@ -31,9 +47,24 @@ export function formatRemaining(seconds: number): string {
   if (sec === 0) return "Done";
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
   if (h > 0) return m > 0 ? `${h}h ${m}m left` : `${h}h left`;
-  if (m > 0) return `${m}m left`;
-  return `${sec}s left`;
+  return `${m}:${String(s).padStart(2, "0")} left`;
+}
+
+export function publishedDisplay(video: Pick<Video, "publishedLabel" | "publishedAt">): string {
+  if (video.publishedLabel) return video.publishedLabel;
+  if (!video.publishedAt) return "";
+  const date = new Date(video.publishedAt);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString(undefined, { dateStyle: "medium" });
+}
+
+export function videoCategory(video: Video): VideoCategory {
+  if (video.category && (VIDEO_CATEGORIES as readonly string[]).includes(video.category)) {
+    return video.category;
+  }
+  return video.techBusiness ? "tech" : "other";
 }
 
 function matchesQuery(video: Video, query: string): boolean {
@@ -45,8 +76,9 @@ function matchesQuery(video: Video, query: string): boolean {
   );
 }
 
-function matchesTech(video: Video, techBusinessOnly: boolean): boolean {
-  return !techBusinessOnly || video.techBusiness;
+function matchesCategory(video: Video, categories: VideoCategory[]): boolean {
+  if (categories.length === 0) return true;
+  return categories.includes(videoCategory(video));
 }
 
 function matchesStatus(
@@ -62,7 +94,7 @@ function matchesStatus(
 
 export function statusCounts(
   videos: Video[],
-  filters: Pick<LibraryFilters, "techBusinessOnly" | "query">,
+  filters: Pick<LibraryFilters, "categories" | "query">,
 ): Record<WatchStatus | "Dropped", number> {
   const counts: Record<WatchStatus | "Dropped", number> = {
     "Almost finished": 0,
@@ -73,12 +105,29 @@ export function statusCounts(
   };
 
   for (const video of videos) {
-    if (!matchesTech(video, filters.techBusinessOnly)) continue;
+    if (!matchesCategory(video, filters.categories)) continue;
     if (!matchesQuery(video, filters.query)) continue;
     if (WATCH_STATUSES.includes(video.status)) {
       counts[video.status] += 1;
     }
     if (video.droppedAt != null) counts.Dropped += 1;
+  }
+
+  return counts;
+}
+
+export function categoryCounts(
+  videos: Video[],
+  filters: Pick<LibraryFilters, "query">,
+): Record<VideoCategory, number> {
+  const counts = Object.fromEntries(VIDEO_CATEGORIES.map((key) => [key, 0])) as Record<
+    VideoCategory,
+    number
+  >;
+
+  for (const video of videos) {
+    if (!matchesQuery(video, filters.query)) continue;
+    counts[videoCategory(video)] += 1;
   }
 
   return counts;
@@ -112,12 +161,24 @@ function compareSaved(a: Video, b: Video): number {
   return (a.savedRank as number) - (b.savedRank as number) || a.title.localeCompare(b.title);
 }
 
+function comparePublished(a: Video, b: Video): number {
+  const aTime = Date.parse(a.publishedAt || "");
+  const bTime = Date.parse(b.publishedAt || "");
+  const aOk = Number.isFinite(aTime);
+  const bOk = Number.isFinite(bTime);
+  if (aOk !== bOk) return aOk ? -1 : 1;
+  if (!aOk && !bOk) return a.title.localeCompare(b.title);
+  return bTime - aTime || a.title.localeCompare(b.title);
+}
+
 function compareVideos(a: Video, b: Video, sort: SortKey): number {
   switch (sort) {
     case "saved":
       return compareSaved(a, b);
     case "remaining":
       return compareRemaining(a, b);
+    case "published":
+      return comparePublished(a, b);
     case "watchedPct":
       return b.watchedPct - a.watchedPct || a.title.localeCompare(b.title);
     case "duration":
@@ -137,7 +198,7 @@ export function filterAndSortVideos(
     .filter(
       (video) =>
         matchesStatus(video, filters.statuses, filters.includeDropped) &&
-        matchesTech(video, filters.techBusinessOnly) &&
+        matchesCategory(video, filters.categories) &&
         matchesQuery(video, filters.query),
     )
     .sort((a, b) => compareVideos(a, b, filters.sort));

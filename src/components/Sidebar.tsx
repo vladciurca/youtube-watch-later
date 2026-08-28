@@ -1,15 +1,16 @@
-import type { LibraryFilters, SortKey, WatchStatus } from "../types";
+import type { LibraryFilters, SortKey, VideoCategory, WatchStatus } from "../types";
 import { WATCH_STATUSES } from "../types";
-import { SORT_OPTIONS } from "../lib/library";
+import { CATEGORY_OPTIONS, SORT_OPTIONS } from "../lib/library";
 
 interface SidebarProps {
   filters: LibraryFilters;
   counts: Record<WatchStatus | "Dropped", number>;
+  categoryCounts: Record<VideoCategory, number>;
   resultCount: number;
   onSelectStatus: (status: WatchStatus) => void;
   live: boolean;
   onToggleDropped: () => void;
-  onToggleTech: () => void;
+  onSelectCategory: (category: VideoCategory) => void;
   onQueryChange: (query: string) => void;
   onSortChange: (sort: SortKey) => void;
   onReset: () => void;
@@ -44,11 +45,12 @@ function Chip({
 export function Sidebar({
   filters,
   counts,
+  categoryCounts,
   resultCount,
   onSelectStatus,
   live,
   onToggleDropped,
-  onToggleTech,
+  onSelectCategory,
   onQueryChange,
   onSortChange,
   onReset,
@@ -90,18 +92,19 @@ export function Sidebar({
       </section>
 
       <section className="filter-block">
-        <h2>Topic</h2>
-        <button
-          type="button"
-          className={`toggle${filters.techBusinessOnly ? " is-on" : ""}`}
-          aria-pressed={filters.techBusinessOnly}
-          onClick={onToggleTech}
-        >
-          <span className="toggle-track" aria-hidden="true">
-            <span className="toggle-knob" />
-          </span>
-          Tech / Business
-        </button>
+        <h2>Category</h2>
+        <div className="chip-stack">
+          {CATEGORY_OPTIONS.map((option) => (
+            <Chip
+              key={option.key}
+              label={option.label}
+              count={categoryCounts[option.key]}
+              selected={filters.categories.includes(option.key)}
+              onClick={() => onSelectCategory(option.key)}
+              tone={option.key}
+            />
+          ))}
+        </div>
       </section>
 
       <section className="filter-block">
@@ -145,9 +148,11 @@ export function Sidebar({
             : "no WL rank yet; leftover time until first sync"
           : filters.sort === "remaining"
             ? "least leftover first, Done last"
-            : filters.sort === "watchedPct"
-              ? "highest watched % first"
-              : "sorted"}
+            : filters.sort === "published"
+              ? "newest publish date first"
+              : filters.sort === "watchedPct"
+                ? "highest watched % first"
+                : "sorted"}
       </p>
     </aside>
   );

@@ -15,6 +15,11 @@
   --notstarted: #9a9aa6;
   --dropped: #6e6e78;
   --tech: #7ee0c3;
+  --health: #8fd4a8;
+  --dating: #e0a0c0;
+  --trailers: #b8a0e8;
+  --travel: #7ec8e8;
+  --other: #9a9aa6;
   --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, monospace;
   --sidebar: 268px;
@@ -193,6 +198,24 @@ p {
 }
 .chip-dropped.is-on {
   border-color: color-mix(in srgb, var(--dropped) 55%, var(--line));
+}
+.chip-tech.is-on {
+  border-color: color-mix(in srgb, var(--tech) 45%, var(--line));
+}
+.chip-health.is-on {
+  border-color: color-mix(in srgb, var(--health) 45%, var(--line));
+}
+.chip-dating.is-on {
+  border-color: color-mix(in srgb, var(--dating) 45%, var(--line));
+}
+.chip-trailers.is-on {
+  border-color: color-mix(in srgb, var(--trailers) 45%, var(--line));
+}
+.chip-travel.is-on {
+  border-color: color-mix(in srgb, var(--travel) 45%, var(--line));
+}
+.chip-other.is-on {
+  border-color: color-mix(in srgb, var(--other) 45%, var(--line));
 }
 
 .toggle {
@@ -448,6 +471,10 @@ p {
 
 .dot {
   color: var(--faint);
+}
+
+.published {
+  color: var(--muted);
 }
 
 .status-pill {

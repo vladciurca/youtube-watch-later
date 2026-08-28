@@ -1,8 +1,13 @@
 import {
+  majorityChannelsByCategory,
+  resolveCategory,
+} from "./categorize.mjs";
+import {
   formatDuration,
   normalizeScrapedVideo,
   remainingSecFrom,
   resumeTimeFrom,
+  savedRankFromScraped,
   statusFromWatchedPct,
 } from "./progress.mjs";
 
@@ -12,6 +17,7 @@ export function mergeWatchLaterLibrary(existingVideos, scrapedVideos, syncedAt) 
     if (video?.id) previous.set(video.id, video);
   }
 
+  const channelMaps = majorityChannelsByCategory(existingVideos);
   const seen = new Set();
   const videos = [];
 
@@ -19,7 +25,7 @@ export function mergeWatchLaterLibrary(existingVideos, scrapedVideos, syncedAt) 
     const scraped = normalizeScrapedVideo(raw);
     if (!scraped || seen.has(scraped.id)) continue;
     seen.add(scraped.id);
-    const savedRank = seen.size - 1;
+    const savedRank = savedRankFromScraped(scraped, seen.size - 1);
 
     const prev = previous.get(scraped.id);
     const durationSec = scraped.durationSec || prev?.durationSec || 0;
@@ -30,6 +36,10 @@ export function mergeWatchLaterLibrary(existingVideos, scrapedVideos, syncedAt) 
       (scraped.duration && durationSec > 0 ? scraped.duration : null) ||
       prev?.duration ||
       formatDuration(durationSec);
+    const publishedAt = scraped.publishedAt || prev?.publishedAt || null;
+    const publishedLabel = scraped.publishedLabel || prev?.publishedLabel || null;
+    const category = resolveCategory(prev, { title, author }, channelMaps);
+    const techBusiness = category === "tech";
 
     videos.push({
       id: scraped.id,
@@ -39,12 +49,15 @@ export function mergeWatchLaterLibrary(existingVideos, scrapedVideos, syncedAt) 
       durationSec,
       watchedPct,
       status: statusFromWatchedPct(watchedPct),
-      techBusiness: prev?.techBusiness === true,
+      techBusiness,
+      category,
       t: resumeTimeFrom(durationSec, watchedPct, scraped.t),
       url: `https://www.youtube.com/watch?v=${scraped.id}`,
       remainingSec: remainingSecFrom(durationSec, watchedPct),
       droppedAt: null,
       savedRank,
+      publishedAt,
+      publishedLabel,
     });
   }
 
