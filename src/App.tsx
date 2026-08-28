@@ -22,6 +22,7 @@ export default function App() {
   const [source, setSource] = useState<string | null>(null);
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
   const [live, setLive] = useState(false);
+  const [partial, setPartial] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<LibraryFilters>(DEFAULT_FILTERS);
@@ -33,6 +34,7 @@ export default function App() {
       setSource(data.source);
       setSyncedAt(data.syncedAt ?? null);
       setLive(fromLive || data.live === true);
+      setPartial(data.partial === true);
       setError(null);
     };
 
@@ -149,6 +151,7 @@ export default function App() {
           source={source}
           syncedAt={syncedAt}
           live={live}
+          partial={partial}
           filtersOpen={filtersOpen}
           onToggleFilters={() => setFiltersOpen((open) => !open)}
           onRefresh={() => void refreshLibrary()}

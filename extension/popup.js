@@ -35,7 +35,9 @@ syncButton.addEventListener("click", async () => {
       throw new Error(result?.error || "Sync failed");
     }
     setStatus(
-      `Synced ${result.upserted} videos (${result.method}). ${result.dropped} marked Dropped. Refresh the library.`,
+      result.partial
+        ? `Synced ${result.upserted} videos (${result.method}), but the scrape looked incomplete. Previous Watch Later entries were kept. Sync again, then refresh the library.`
+        : `Synced ${result.upserted} videos (${result.method}). ${result.dropped} marked Dropped. Refresh the library.`,
       "ok",
     );
   } catch (error) {

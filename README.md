@@ -31,6 +31,8 @@ Short version:
 
 Videos that disappear from Watch Later keep their last snapshot and get `droppedAt`. The **Dropped** filter then lists them.
 
+If a scrape looks truncated (fewer than 80% of the previous on-list library, and that library has at least 50 videos), missing videos are **not** marked Dropped. The library is stored with `partial: true` and the UI shows **sync incomplete**. A later full scrape still drops videos that are actually gone.
+
 Sync records `savedRank` from Watch Later playlist order (`playlistVideoRenderer.index`, stored 0-based so 0 = newest / top of the YT list). Continuations append in that same playlist order. Dropped videos keep their last rank and sort last under **Saved**.
 
 New Watch Later videos get a `category` at sync time from title + channel: majority category channels already in the library, plus keywords. Categories:
