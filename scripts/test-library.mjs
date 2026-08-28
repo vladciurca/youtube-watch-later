@@ -394,6 +394,77 @@ assert.equal(formatRemaining(3600), "1h left");
 assert.match(libraryTs, /\$\{m\}:\$\{String\(s\)\.padStart\(2, "0"\)\} left/);
 assert.match(libraryTs, /key: "published", label: "Published"/);
 
+function mergeId(i) {
+  return `v${String(i).padStart(10, "0")}`;
+}
+
+function previousLibraryVideo(i, extra = {}) {
+  return {
+    id: mergeId(i),
+    title: `Previous ${i}`,
+    author: "Channel",
+    duration: "2:00",
+    durationSec: 120,
+    watchedPct: 0,
+    status: "Not started",
+    techBusiness: false,
+    category: "other",
+    t: 0,
+    url: `https://www.youtube.com/watch?v=${mergeId(i)}`,
+    remainingSec: 120,
+    droppedAt: null,
+    savedRank: i,
+    ...extra,
+  };
+}
+
+function scrapedLibraryVideo(i) {
+  return vid(mergeId(i), { title: `Scraped ${i}` });
+}
+
+const previous665 = Array.from({ length: 665 }, (_, i) => previousLibraryVideo(i));
+const scrape100 = Array.from({ length: 100 }, (_, i) => scrapedLibraryVideo(i));
+const { library: truncatedLib, stats: truncatedStats } = mergeWatchLaterLibrary(
+  previous665,
+  scrape100,
+  "2026-08-28T12:00:00.000Z",
+);
+assert.equal(truncatedStats.upserted, 100);
+assert.equal(truncatedStats.partial, true);
+assert.equal(truncatedLib.partial, true);
+assert.equal(
+  truncatedLib.videos.filter((video) => video.droppedAt == null).length,
+  665,
+);
+assert.equal(
+  truncatedLib.videos.filter((video) => video.droppedAt != null).length,
+  0,
+);
+assert.equal(truncatedLib.videos.find((video) => video.id === mergeId(100)).droppedAt, null);
+assert.equal(truncatedLib.videos.find((video) => video.id === mergeId(0)).title, "Scraped 0");
+
+const scrape650 = Array.from({ length: 650 }, (_, i) => scrapedLibraryVideo(i));
+const { library: fullishLib, stats: fullishStats } = mergeWatchLaterLibrary(
+  previous665,
+  scrape650,
+  "2026-08-28T12:05:00.000Z",
+);
+assert.equal(fullishStats.partial, false);
+assert.equal(fullishLib.partial, false);
+assert.equal(
+  fullishLib.videos.filter((video) => video.droppedAt == null).length,
+  650,
+);
+assert.equal(
+  fullishLib.videos.filter((video) => video.droppedAt === "2026-08-28T12:05:00.000Z").length,
+  15,
+);
+assert.equal(fullishLib.videos.find((video) => video.id === mergeId(650)).droppedAt, "2026-08-28T12:05:00.000Z");
+assert.equal(fullishLib.videos.find((video) => video.id === mergeId(664)).droppedAt, "2026-08-28T12:05:00.000Z");
+assert.equal(fullishLib.videos.find((video) => video.id === mergeId(0)).droppedAt, null);
+
+assert.equal(library.partial, false);
+
 console.log(
-  "library tests: exclusive chips, remaining sort, upsert, dropped, savedRank, publishedAt, categorize, formatRemaining ok",
+  "library tests: exclusive chips, remaining sort, upsert, dropped, savedRank, publishedAt, categorize, formatRemaining, partial scrape guard ok",
 );

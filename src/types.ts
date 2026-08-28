@@ -62,6 +62,8 @@ export interface VideoLibrary {
   videos: Video[];
   syncedAt?: string | null;
   live?: boolean;
+  /** True when a truncated scrape was merged without mass-dropping missing videos. */
+  partial?: boolean;
 }
 
 export interface LibraryFilters {

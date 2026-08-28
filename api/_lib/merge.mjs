@@ -11,6 +11,19 @@ import {
   statusFromWatchedPct,
 } from "./progress.mjs";
 
+const PARTIAL_SYNC_MIN_PREVIOUS = 50;
+const PARTIAL_SYNC_RATIO = 0.8;
+
+export function isPartialWatchLaterScrape(existingVideos, scrapedCount) {
+  const previousOnList = existingVideos.filter(
+    (video) => video?.id && video.droppedAt == null,
+  ).length;
+  return (
+    previousOnList >= PARTIAL_SYNC_MIN_PREVIOUS &&
+    scrapedCount < PARTIAL_SYNC_RATIO * previousOnList
+  );
+}
+
 export function mergeWatchLaterLibrary(existingVideos, scrapedVideos, syncedAt) {
   const previous = new Map();
   for (const video of existingVideos) {
@@ -61,9 +74,15 @@ export function mergeWatchLaterLibrary(existingVideos, scrapedVideos, syncedAt) 
     });
   }
 
+  const partial = isPartialWatchLaterScrape(existingVideos, seen.size);
+
   let dropped = 0;
   for (const prev of existingVideos) {
     if (!prev?.id || seen.has(prev.id)) continue;
+    if (partial && prev.droppedAt == null) {
+      videos.push({ ...prev });
+      continue;
+    }
     videos.push({
       ...prev,
       droppedAt: prev.droppedAt ?? syncedAt,
@@ -77,12 +96,14 @@ export function mergeWatchLaterLibrary(existingVideos, scrapedVideos, syncedAt) 
       source: "YouTube Watch Later sync",
       syncedAt,
       live: true,
+      partial,
       videos,
     },
     stats: {
       upserted: seen.size,
       dropped,
       total: videos.length,
+      partial,
     },
   };
 }

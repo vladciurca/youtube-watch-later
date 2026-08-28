@@ -123,57 +123,31 @@
     return false;
   }
 
-  function browsePlaylistContents(root) {
-    const tabs = root?.contents?.twoColumnBrowseResultsRenderer?.tabs;
-    if (!Array.isArray(tabs)) return null;
-    for (const tab of tabs) {
-      const sections = tab?.tabRenderer?.content?.sectionListRenderer?.contents;
-      if (!Array.isArray(sections)) continue;
-      for (const section of sections) {
-        const items = section?.itemSectionRenderer?.contents;
-        if (!Array.isArray(items)) continue;
-        for (const item of items) {
-          const renderer = item?.playlistVideoListRenderer;
-          if (isWatchLaterPlaylist(renderer)) return renderer.contents;
-        }
-      }
-    }
-    return null;
-  }
-
-  function findWatchLaterContents(root) {
-    const fromBrowse = browsePlaylistContents(root);
-    if (fromBrowse) return fromBrowse;
-
-    const matches = [];
-    const seen = new Set();
-    const stack = [root];
-    while (stack.length) {
-      const node = stack.pop();
-      if (!node || typeof node !== "object") continue;
-      if (seen.has(node)) continue;
-      seen.add(node);
-      const renderer = node.playlistVideoListRenderer;
-      if (isWatchLaterPlaylist(renderer)) {
-        matches.push(renderer.contents);
-        continue;
-      }
-      const kids = Array.isArray(node) ? node : Object.values(node);
-      for (const child of kids) {
-        if (child && typeof child === "object") stack.push(child);
-      }
-    }
-    if (matches.length === 0) return null;
-    matches.sort((a, b) => b.length - a.length);
-    return matches[0];
-  }
-
   function continuationToken(node) {
+    if (!node || typeof node !== "object") return null;
+    const renderer = node.continuationItemRenderer;
     return (
-      node?.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token ||
-      node?.FAKESECRET_o1p2q3r4s5t6u7v8w9x0?.continuation ||
+      renderer?.continuationEndpoint?.continuationCommand?.token ||
+      renderer?.button?.buttonRenderer?.command?.continuationCommand?.token ||
+      node.FAKESECRET_o1p2q3r4s5t6u7v8w9x0?.continuation ||
+      node.nextContinuationData?.continuation ||
+      (typeof node.continuationCommand?.token === "string"
+        ? node.continuationCommand.token
+        : null) ||
       null
     );
+  }
+
+  function tokenFromContinuations(continuations) {
+    if (!Array.isArray(continuations)) return null;
+    let next = null;
+    for (const item of continuations) {
+      const token =
+        continuationToken(item) ||
+        (typeof item?.continuation === "string" ? item.continuation : null);
+      if (token) next = token;
+    }
+    return next;
   }
 
   function collectFromItems(items, videos) {
@@ -190,26 +164,176 @@
     return next;
   }
 
-  function collectContinuations(payload, videos) {
+  function collectFromPlaylistRenderer(renderer, videos) {
+    if (!renderer) return null;
+    let next = collectFromItems(renderer.contents, videos);
+    const legacy = tokenFromContinuations(renderer.continuations);
+    if (legacy) next = legacy;
+    return next;
+  }
+
+  function pushContinuationItemLists(node, lists) {
+    if (!node || typeof node !== "object") return;
+    const items =
+      node.continuationItems ||
+      node.appendContinuationItemsAction?.continuationItems ||
+      node.reloadContinuationItemsCommand?.continuationItems;
+    if (Array.isArray(items)) lists.push(items);
+    const commands = node.commandExecutorCommand?.commands;
+    if (Array.isArray(commands)) {
+      for (const command of commands) pushContinuationItemLists(command, lists);
+    }
+  }
+
+  function collectKnownContinuationPaths(payload, videos) {
     let next = null;
-    const received =
-      payload?.onResponseReceivedActions ||
-      payload?.onResponseReceivedEndpoints ||
-      [];
+    const lists = [];
+    const received = [
+      ...(Array.isArray(payload?.onResponseReceivedActions)
+        ? payload.onResponseReceivedActions
+        : []),
+      ...(Array.isArray(payload?.onResponseReceivedEndpoints)
+        ? payload.onResponseReceivedEndpoints
+        : []),
+    ];
     for (const action of received) {
-      const items =
-        action?.appendContinuationItemsAction?.continuationItems ||
-        action?.reloadContinuationItemsCommand?.continuationItems;
+      pushContinuationItemLists(action, lists);
+    }
+
+    const continuationContents = payload?.continuationContents;
+    if (continuationContents && typeof continuationContents === "object") {
+      for (const value of Object.values(continuationContents)) {
+        if (!value || typeof value !== "object") continue;
+        if (Array.isArray(value.contents)) lists.push(value.contents);
+        const legacy = tokenFromContinuations(value.continuations);
+        if (legacy) next = legacy;
+        if (value.playlistVideoListRenderer) {
+          const token = collectFromPlaylistRenderer(
+            value.playlistVideoListRenderer,
+            videos,
+          );
+          if (token) next = token;
+        }
+      }
+    }
+
+    for (const items of lists) {
       const token = collectFromItems(items, videos);
       if (token) next = token;
     }
     return next;
   }
 
+  function walkPlaylistVideosAndTokens(root, videos) {
+    let next = null;
+    const seen = new Set();
+    const stack = [root];
+    while (stack.length) {
+      const node = stack.pop();
+      if (!node || typeof node !== "object") continue;
+      if (seen.has(node)) continue;
+      seen.add(node);
+
+      if (node.playlistVideoRenderer) {
+        const video = normalizeRenderer(node.playlistVideoRenderer);
+        if (video) videos.push(video);
+        continue;
+      }
+
+      if (node.playlistVideoListRenderer) {
+        const token = collectFromPlaylistRenderer(node.playlistVideoListRenderer, videos);
+        if (token) next = token;
+      }
+
+      const token = continuationToken(node);
+      if (token) next = token;
+
+      if (Array.isArray(node)) {
+        for (let i = node.length - 1; i >= 0; i -= 1) {
+          if (node[i] && typeof node[i] === "object") stack.push(node[i]);
+        }
+      } else {
+        const values = Object.values(node);
+        for (let i = values.length - 1; i >= 0; i -= 1) {
+          if (values[i] && typeof values[i] === "object") stack.push(values[i]);
+        }
+      }
+    }
+    return next;
+  }
+
+  function collectContinuations(payload, videos) {
+    const known = collectKnownContinuationPaths(payload, videos);
+    const walked = walkPlaylistVideosAndTokens(payload, videos);
+    return known || walked;
+  }
+
+  function collectBrowseWatchLater(root, videos) {
+    const tabs = root?.contents?.twoColumnBrowseResultsRenderer?.tabs;
+    if (!Array.isArray(tabs)) return { found: false, next: null };
+    for (const tab of tabs) {
+      const sectionList = tab?.tabRenderer?.content?.sectionListRenderer;
+      const sections = sectionList?.contents;
+      if (!Array.isArray(sections)) continue;
+      let found = false;
+      let next = null;
+      for (const section of sections) {
+        const items = section?.itemSectionRenderer?.contents;
+        if (Array.isArray(items)) {
+          for (const item of items) {
+            if (isWatchLaterPlaylist(item?.playlistVideoListRenderer)) {
+              found = true;
+              const token = collectFromPlaylistRenderer(
+                item.playlistVideoListRenderer,
+                videos,
+              );
+              if (token) next = token;
+            } else {
+              const token = continuationToken(item);
+              if (token) next = token;
+            }
+          }
+        }
+        const sectionToken = continuationToken(section);
+        if (sectionToken) next = sectionToken;
+      }
+      const listToken =
+        continuationToken(sectionList) ||
+        tokenFromContinuations(sectionList?.continuations);
+      if (listToken) next = listToken;
+      if (found) return { found: true, next };
+    }
+    return { found: false, next: null };
+  }
+
   function collectInitial(payload, videos) {
-    const contents = findWatchLaterContents(payload);
-    let next = collectFromItems(contents, videos);
-    const continued = collectContinuations(payload, videos);
+    const browse = collectBrowseWatchLater(payload, videos);
+    if (browse.found) {
+      const continued = collectKnownContinuationPaths(payload, videos);
+      return continued || browse.next;
+    }
+
+    const matches = [];
+    const seen = new Set();
+    const stack = [payload];
+    while (stack.length) {
+      const node = stack.pop();
+      if (!node || typeof node !== "object") continue;
+      if (seen.has(node)) continue;
+      seen.add(node);
+      const renderer = node.playlistVideoListRenderer;
+      if (isWatchLaterPlaylist(renderer)) {
+        matches.push(renderer);
+        continue;
+      }
+      const kids = Array.isArray(node) ? node : Object.values(node);
+      for (const child of kids) {
+        if (child && typeof child === "object") stack.push(child);
+      }
+    }
+    matches.sort((a, b) => (b.contents?.length || 0) - (a.contents?.length || 0));
+    let next = collectFromPlaylistRenderer(matches[0], videos);
+    const continued = collectKnownContinuationPaths(payload, videos);
     return continued || next;
   }
 
@@ -237,8 +361,14 @@
     let continuation = collectInitial(initial, videos);
     for (const video of videos) seen.add(video.id);
 
+    const MAX_PAGES = 250;
+    const MAX_EMPTY_PAGES = 3;
     let guard = 0;
-    while (continuation && guard < 80) {
+    let emptyStreak = 0;
+    let previousToken = null;
+    while (continuation && guard < MAX_PAGES) {
+      if (continuation === previousToken) break;
+      previousToken = continuation;
       guard += 1;
       const response = await fetch(
         `/youtubei/v1/browse?key=${encodeURIComponent(apiKey)}&prettyPrint=false`,
@@ -253,10 +383,18 @@
       const payload = await response.json();
       const batch = [];
       continuation = collectContinuations(payload, batch);
+      let added = 0;
       for (const video of batch) {
         if (seen.has(video.id)) continue;
         seen.add(video.id);
         videos.push(video);
+        added += 1;
+      }
+      if (added === 0) {
+        emptyStreak += 1;
+        if (emptyStreak >= MAX_EMPTY_PAGES) break;
+      } else {
+        emptyStreak = 0;
       }
     }
 

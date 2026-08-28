@@ -390,7 +390,8 @@ p {
   line-height: 1.4;
 }
 
-.sync-hint.is-stale {
+.sync-hint.is-stale,
+.sync-hint.is-partial {
   color: #d0a36a;
 }
 
