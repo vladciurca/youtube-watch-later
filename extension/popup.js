@@ -11,9 +11,21 @@ function setStatus(text, kind) {
   status.classList.toggle("is-ok", kind === "ok");
 }
 
-const stored = await chrome.storage.local.get(["apiUrl", "syncSecret"]);
+const RESET_DROPPED_PENDING_KEY = "resetDroppedPending";
+
+const stored = await chrome.storage.local.get([
+  "apiUrl",
+  "syncSecret",
+  RESET_DROPPED_PENDING_KEY,
+]);
 apiUrl.value = stored.apiUrl || DEFAULT_API;
 syncSecret.value = stored.syncSecret || "";
+let resetPending = stored[RESET_DROPPED_PENDING_KEY] !== false;
+if (resetPending) {
+  setStatus(
+    "Next sync restores videos marked Dropped after the first-page-only scrape. A full Watch Later scrape then marks Dropped only for videos missing from YouTube.",
+  );
+}
 
 async function persist() {
   await chrome.storage.local.set({
@@ -28,16 +40,27 @@ syncSecret.addEventListener("change", () => void persist());
 syncButton.addEventListener("click", async () => {
   await persist();
   syncButton.disabled = true;
-  setStatus("Opening Watch Later and scraping progress…");
+  setStatus(
+    resetPending
+      ? "Opening Watch Later… Restoring Dropped from the incomplete first-page scrape, then merging."
+      : "Opening Watch Later and scraping progress…",
+  );
   try {
     const result = await chrome.runtime.sendMessage({ type: "SYNC_WATCH_LATER" });
     if (!result?.ok) {
       throw new Error(result?.error || "Sync failed");
     }
+    if (result.resetDropped === true) {
+      resetPending = false;
+    }
+    const restored =
+      result.resetDropped === true
+        ? `Restored ${result.clearedDropped ?? 0} Dropped stamps from the first-page scrape, then `
+        : "";
     setStatus(
       result.partial
-        ? `Synced ${result.upserted} videos (${result.method}), but the scrape looked incomplete. Previous Watch Later entries were kept. Sync again, then refresh the library.`
-        : `Synced ${result.upserted} videos (${result.method}). ${result.dropped} marked Dropped. Refresh the library.`,
+        ? `${restored}synced ${result.upserted} videos (${result.method}), but the scrape looked incomplete. Previous Watch Later entries were kept. Sync again, then refresh the library.`
+        : `${restored}synced ${result.upserted} videos (${result.method}). ${result.dropped} marked Dropped. Refresh the library.`,
       "ok",
     );
   } catch (error) {

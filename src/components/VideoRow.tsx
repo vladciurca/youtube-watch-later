@@ -58,7 +58,12 @@ export function VideoRow({ video }: VideoRowProps) {
             {video.status}
           </span>
           {video.droppedAt ? (
-            <span className="status-pill dropped">Dropped</span>
+            <span
+              className="status-pill dropped"
+              title="Not in the last full YouTube Watch Later scrape"
+            >
+              Dropped
+            </span>
           ) : null}
         </p>
         <div className="progress-row">

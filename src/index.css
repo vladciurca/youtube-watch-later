@@ -199,6 +199,13 @@ p {
 .chip-dropped.is-on {
   border-color: color-mix(in srgb, var(--dropped) 55%, var(--line));
 }
+
+.chip-hint {
+  margin: 2px 2px 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--faint);
+}
 .chip-tech.is-on {
   border-color: color-mix(in srgb, var(--tech) 45%, var(--line));
 }

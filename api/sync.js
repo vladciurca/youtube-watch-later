@@ -30,6 +30,8 @@ export default async function handler(req, res) {
     return;
   }
 
+  const resetDropped = body.resetDropped === true;
+
   try {
     const existing = await loadExistingLibrary(req);
     const syncedAt = new Date().toISOString();
@@ -37,6 +39,7 @@ export default async function handler(req, res) {
       existing.videos ?? [],
       scraped,
       syncedAt,
+      { resetDropped },
     );
     await saveLiveLibrary(library);
     json(res, 200, { ok: true, ...stats, syncedAt });

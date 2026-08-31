@@ -29,9 +29,11 @@ Short version:
 3. Click **Sync Watch Later**
 4. Refresh the site
 
-Videos that disappear from Watch Later keep their last snapshot and get `droppedAt`. The **Dropped** filter then lists them.
+Videos that disappear from Watch Later keep their last snapshot and get `droppedAt`. The **Dropped** filter then lists them. That means **not in the last full YouTube WL scrape**, not that you marked the video dropped.
 
 If a scrape looks truncated (fewer than 80% of the previous on-list library, and that library has at least 50 videos), missing videos are **not** marked Dropped. The library is stored with `partial: true` and the UI shows **sync incomplete**. A later full scrape still drops videos that are actually gone.
+
+The first live scrape only read YouTube's first page (~100 videos) and stamped `droppedAt` on the rest of the seeded library. A later ~100-video sync is not treated as partial once only those 100 remain on-list, so the false stamps stuck. The updated extension sends `{ resetDropped: true }` **once** on the next sync (reload unpacked, then Sync Watch Later). That clears current Dropped stamps, then merge runs as usual: videos in the scrape stay on-list; a full scrape re-drops videos that are actually gone; a partial scrape does not mass-drop the restored ones.
 
 Sync records `savedRank` from Watch Later playlist order (`playlistVideoRenderer.index`, stored 0-based so 0 = newest / top of the YT list). Continuations append in that same playlist order. Dropped videos keep their last rank and sort last under **Saved**.
 
