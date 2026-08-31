@@ -24,13 +24,36 @@ export function isPartialWatchLaterScrape(existingVideos, scrapedCount) {
   );
 }
 
-export function mergeWatchLaterLibrary(existingVideos, scrapedVideos, syncedAt) {
+export function clearDroppedStamps(videos) {
+  let cleared = 0;
+  const next = videos.map((video) => {
+    if (!video || video.droppedAt == null) return video;
+    cleared += 1;
+    return { ...video, droppedAt: null };
+  });
+  return { videos: next, cleared };
+}
+
+export function mergeWatchLaterLibrary(
+  existingVideos,
+  scrapedVideos,
+  syncedAt,
+  options = {},
+) {
+  const resetDropped = options.resetDropped === true;
+  const prepared = resetDropped
+    ? clearDroppedStamps(existingVideos).videos
+    : existingVideos;
+  const clearedDropped = resetDropped
+    ? existingVideos.filter((video) => video?.droppedAt != null).length
+    : 0;
+
   const previous = new Map();
-  for (const video of existingVideos) {
+  for (const video of prepared) {
     if (video?.id) previous.set(video.id, video);
   }
 
-  const channelMaps = majorityChannelsByCategory(existingVideos);
+  const channelMaps = majorityChannelsByCategory(prepared);
   const seen = new Set();
   const videos = [];
 
@@ -74,10 +97,10 @@ export function mergeWatchLaterLibrary(existingVideos, scrapedVideos, syncedAt) 
     });
   }
 
-  const partial = isPartialWatchLaterScrape(existingVideos, seen.size);
+  const partial = isPartialWatchLaterScrape(prepared, seen.size);
 
   let dropped = 0;
-  for (const prev of existingVideos) {
+  for (const prev of prepared) {
     if (!prev?.id || seen.has(prev.id)) continue;
     if (partial && prev.droppedAt == null) {
       videos.push({ ...prev });
@@ -104,6 +127,8 @@ export function mergeWatchLaterLibrary(existingVideos, scrapedVideos, syncedAt) 
       dropped,
       total: videos.length,
       partial,
+      resetDropped,
+      clearedDropped,
     },
   };
 }

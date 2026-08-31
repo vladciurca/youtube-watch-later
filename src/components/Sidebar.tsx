@@ -22,18 +22,21 @@ function Chip({
   selected,
   onClick,
   tone,
+  title,
 }: {
   label: string;
   count: number;
   selected: boolean;
   onClick: () => void;
   tone: string;
+  title?: string;
 }) {
   return (
     <button
       type="button"
       className={`chip chip-${tone}${selected ? " is-on" : ""}`}
       aria-pressed={selected}
+      title={title}
       onClick={onClick}
     >
       <span className="chip-label">{label}</span>
@@ -87,7 +90,12 @@ export function Sidebar({
             selected={filters.includeDropped}
             onClick={onToggleDropped}
             tone="dropped"
+            title="Not in the last full YouTube Watch Later scrape"
           />
+          <p className="chip-hint">
+            Not in the last full YouTube WL scrape — not something you marked
+            dropped.
+          </p>
         </div>
       </section>
 

@@ -81,14 +81,25 @@ async function scrapeTab(tabId) {
   return injection?.result;
 }
 
-async function postSync(apiUrl, syncSecret, videos) {
+const RESET_DROPPED_PENDING_KEY = "resetDroppedPending";
+
+async function shouldResetDropped() {
+  const stored = await chrome.storage.local.get([RESET_DROPPED_PENDING_KEY]);
+  return stored[RESET_DROPPED_PENDING_KEY] !== false;
+}
+
+async function markResetDroppedDone() {
+  await chrome.storage.local.set({ [RESET_DROPPED_PENDING_KEY]: false });
+}
+
+async function postSync(apiUrl, syncSecret, videos, resetDropped) {
   const response = await fetch(`${apiUrl}/api/sync`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-sync-secret": syncSecret,
     },
-    body: JSON.stringify({ videos }),
+    body: JSON.stringify({ videos, ...(resetDropped ? { resetDropped: true } : {}) }),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -110,11 +121,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!scraped?.videos?.length) {
       throw new Error("No Watch Later videos were scraped.");
     }
-    const result = await postSync(apiUrl, syncSecret, scraped.videos);
+    const resetDropped = await shouldResetDropped();
+    const result = await postSync(apiUrl, syncSecret, scraped.videos, resetDropped);
+    if (resetDropped && result.resetDropped === true) {
+      await markResetDroppedDone();
+    }
     return {
       ok: true,
       method: scraped.method,
       scraped: scraped.videos.length,
+      resetDropped: result.resetDropped === true,
+      clearedDropped: result.clearedDropped ?? 0,
       ...result,
     };
   })()

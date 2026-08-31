@@ -464,7 +464,86 @@ assert.equal(fullishLib.videos.find((video) => video.id === mergeId(664)).droppe
 assert.equal(fullishLib.videos.find((video) => video.id === mergeId(0)).droppedAt, null);
 
 assert.equal(library.partial, false);
+assert.equal(stats.resetDropped, false);
+assert.equal(stats.clearedDropped, 0);
+
+const sidebarTs = readFileSync(join(root, "../src/components/Sidebar.tsx"), "utf8");
+assert.match(sidebarTs, /Not in the last full YouTube WL scrape/);
+assert.match(sidebarTs, /not something you marked/);
+
+const popupJs = readFileSync(join(root, "../extension/popup.js"), "utf8");
+const backgroundJs = readFileSync(join(root, "../extension/background.js"), "utf8");
+const syncJs = readFileSync(join(root, "../api/sync.js"), "utf8");
+assert.match(syncJs, /body\.resetDropped === true/);
+assert.match(backgroundJs, /resetDroppedPending/);
+assert.match(backgroundJs, /resetDropped: true/);
+assert.match(popupJs, /Restoring Dropped from the incomplete first-page scrape/);
+
+// After the first-page massacre, previousOnList is ~100, so a later 100-video
+// scrape is NOT partial and keeps already-stamped droppedAt.
+const massacreOnList = Array.from({ length: 100 }, (_, i) => previousLibraryVideo(i));
+const massacreDropped = Array.from({ length: 575 }, (_, i) =>
+  previousLibraryVideo(i + 100, { droppedAt: "2026-08-28T11:52:57.036Z" }),
+);
+const massacreLibrary = [...massacreOnList, ...massacreDropped];
+const scrapeFirstPage = Array.from({ length: 100 }, (_, i) => scrapedLibraryVideo(i));
+const { library: stillDroppedLib, stats: stillDroppedStats } = mergeWatchLaterLibrary(
+  massacreLibrary,
+  scrapeFirstPage,
+  "2026-08-30T05:54:57.048Z",
+);
+assert.equal(stillDroppedStats.partial, false);
+assert.equal(stillDroppedStats.resetDropped, false);
+assert.equal(
+  stillDroppedLib.videos.filter((video) => video.droppedAt != null).length,
+  575,
+);
+assert.equal(
+  stillDroppedLib.videos.find((video) => video.id === mergeId(100)).droppedAt,
+  "2026-08-28T11:52:57.036Z",
+);
+
+// resetDropped then a partial scrape must not re-drop the restored videos
+const { library: resetPartialLib, stats: resetPartialStats } = mergeWatchLaterLibrary(
+  massacreLibrary,
+  scrapeFirstPage,
+  "2026-08-31T12:00:00.000Z",
+  { resetDropped: true },
+);
+assert.equal(resetPartialStats.resetDropped, true);
+assert.equal(resetPartialStats.clearedDropped, 575);
+assert.equal(resetPartialStats.partial, true);
+assert.equal(resetPartialStats.dropped, 0);
+assert.equal(
+  resetPartialLib.videos.filter((video) => video.droppedAt == null).length,
+  675,
+);
+assert.equal(resetPartialLib.videos.find((video) => video.id === mergeId(100)).droppedAt, null);
+assert.equal(resetPartialLib.videos.find((video) => video.id === mergeId(0)).title, "Scraped 0");
+
+// resetDropped then a full scrape re-drops videos absent from that scrape
+const scrapeFull = Array.from({ length: 650 }, (_, i) => scrapedLibraryVideo(i));
+const { library: resetFullLib, stats: resetFullStats } = mergeWatchLaterLibrary(
+  massacreLibrary,
+  scrapeFull,
+  "2026-08-31T12:05:00.000Z",
+  { resetDropped: true },
+);
+assert.equal(resetFullStats.resetDropped, true);
+assert.equal(resetFullStats.clearedDropped, 575);
+assert.equal(resetFullStats.partial, false);
+assert.equal(resetFullStats.dropped, 25);
+assert.equal(
+  resetFullLib.videos.filter((video) => video.droppedAt == null).length,
+  650,
+);
+assert.equal(
+  resetFullLib.videos.find((video) => video.id === mergeId(650)).droppedAt,
+  "2026-08-31T12:05:00.000Z",
+);
+assert.equal(resetFullLib.videos.find((video) => video.id === mergeId(0)).droppedAt, null);
+assert.equal(resetFullLib.videos.find((video) => video.id === mergeId(100)).droppedAt, null);
 
 console.log(
-  "library tests: exclusive chips, remaining sort, upsert, dropped, savedRank, publishedAt, categorize, formatRemaining, partial scrape guard ok",
+  "library tests: exclusive chips, remaining sort, upsert, dropped, savedRank, publishedAt, categorize, formatRemaining, partial scrape guard, resetDropped repair ok",
 );
