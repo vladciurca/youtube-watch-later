@@ -35,6 +35,8 @@ If a scrape looks truncated (fewer than 80% of the previous on-list library, and
 
 The first live scrape only read YouTube's first page (~100 videos) and stamped `droppedAt` on the rest of the seeded library. A later ~100-video sync is not treated as partial once only those 100 remain on-list, so the false stamps stuck. The updated extension sends `{ resetDropped: true }` **once** on the next sync (reload unpacked, then Sync Watch Later). That clears current Dropped stamps, then merge runs as usual: videos in the scrape stay on-list; a full scrape re-drops videos that are actually gone; a partial scrape does not mass-drop the restored ones.
 
+Extension 1.2.1 follows current Innertube continuation shapes and falls back to a DOM scroll when an Innertube result still looks like a first-page stall. Reload unpacked (or install `extension/watch-later-sync.zip`) and Sync once; a complete scrape should clear `partial` and the UI banner.
+
 Sync records `savedRank` from Watch Later playlist order (`playlistVideoRenderer.index`, stored 0-based so 0 = newest / top of the YT list). Continuations append in that same playlist order. Dropped videos keep their last rank and sort last under **Saved**.
 
 New Watch Later videos get a `category` at sync time from title + channel: majority category channels already in the library, plus keywords. Categories:

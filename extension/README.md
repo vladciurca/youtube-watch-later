@@ -26,7 +26,12 @@ You can also unzip `extension/watch-later-sync.zip` and load that folder the sam
 
 1. Stay signed into YouTube in Chrome
 2. Click **Sync Watch Later**
-3. The extension opens or focuses the Watch Later playlist, reads the WL playlist contents (not a generic tree-walk), follows Innertube continuations past the first ~100 videos, and records `playlistVideoRenderer.index`, progress bars, and `publishedTimeText` / videoInfo dates, then upserts by video id
-4. Refresh the site. Videos gone from Watch Later keep their last snapshot and appear under **Dropped** (not in the last full YouTube WL scrape). A truncated scrape does not mass-drop the rest of the library.
+3. The extension opens or focuses the Watch Later playlist, reads the WL playlist contents (not a generic tree-walk), follows Innertube continuations past the first ~100 videos (`continuationItemRenderer`, `commandExecutorCommand`, and `continuationItemViewModel` tokens; `playlistVideoRenderer` and `lockupViewModel` items), and records playlist order, progress bars, and published dates, then upserts by video id
+4. If Innertube still looks truncated (about one page, or under 80% of the previously known on-list size / playlist header count), it automatically falls back to scrolling the DOM and keeps whichever scrape has more unique videos
+5. Refresh the site. Videos gone from Watch Later keep their last snapshot and appear under **Dropped** (not in the last full YouTube WL scrape). A truncated scrape does not mass-drop the rest of the library.
 
-After updating to 1.2.0, reload the unpacked extension and sync once. That sync restores videos that were marked Dropped after the first-page-only scrape, then merges. A full scrape marks Dropped only for videos missing from YouTube; a truncated scrape keeps the restored entries.
+## Verify a full scrape (v1.2.1)
+
+1. `chrome://extensions` → reload the unpacked `extension/` folder, or unzip `extension/watch-later-sync.zip` and load that folder
+2. Stay signed into YouTube, then click **Sync Watch Later** once on `https://www.youtube.com/playlist?list=WL`
+3. Refresh the library. Expect `partial: false` on `/api/library`, no “Sync incomplete” banner, and a scraped count near the full Watch Later size (not stuck at ~100 with `savedRank` only on the first page)

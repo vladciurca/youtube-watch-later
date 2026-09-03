@@ -61,7 +61,20 @@ async function findOrOpenWatchLater() {
   return created.id;
 }
 
-async function scrapeTab(tabId) {
+async function previousOnListCount(apiUrl) {
+  try {
+    const response = await fetch(`${apiUrl}/api/library`, { cache: "no-store" });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const videos = Array.isArray(payload?.videos) ? payload.videos : [];
+    const onList = videos.filter((video) => video?.id && video.droppedAt == null).length;
+    return onList > 0 ? onList : null;
+  } catch {
+    return null;
+  }
+}
+
+async function scrapeTab(tabId, expectedCount) {
   await chrome.scripting.executeScript({
     target: { tabId },
     world: "MAIN",
@@ -70,12 +83,13 @@ async function scrapeTab(tabId) {
   const [injection] = await chrome.scripting.executeScript({
     target: { tabId },
     world: "MAIN",
-    func: async () => {
+    func: async (expected) => {
       if (typeof window.__watchLaterScrape !== "function") {
         throw new Error("Scrape helper did not load");
       }
-      return window.__watchLaterScrape();
+      return window.__watchLaterScrape({ expectedCount: expected });
     },
+    args: [expectedCount ?? null],
   });
   if (injection?.error) throw new Error(injection.error.message);
   return injection?.result;
@@ -116,8 +130,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!syncSecret) {
       throw new Error("Set the sync secret in this popup (same value as Vercel SYNC_SECRET).");
     }
-    const tabId = await findOrOpenWatchLater();
-    const scraped = await scrapeTab(tabId);
+    const [tabId, expectedCount] = await Promise.all([
+      findOrOpenWatchLater(),
+      previousOnListCount(apiUrl),
+    ]);
+    const scraped = await scrapeTab(tabId, expectedCount);
     if (!scraped?.videos?.length) {
       throw new Error("No Watch Later videos were scraped.");
     }

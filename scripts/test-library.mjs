@@ -424,6 +424,23 @@ function scrapedLibraryVideo(i) {
 
 const previous665 = Array.from({ length: 665 }, (_, i) => previousLibraryVideo(i));
 const scrape100 = Array.from({ length: 100 }, (_, i) => scrapedLibraryVideo(i));
+const previous676 = Array.from({ length: 676 }, (_, i) => previousLibraryVideo(i));
+const { library: truncated676Lib, stats: truncated676Stats } = mergeWatchLaterLibrary(
+  previous676,
+  scrape100,
+  "2026-09-03T18:17:58.025Z",
+);
+assert.equal(truncated676Stats.partial, true);
+assert.equal(truncated676Lib.partial, true);
+assert.equal(
+  truncated676Lib.videos.filter((video) => video.droppedAt == null).length,
+  676,
+);
+assert.equal(
+  truncated676Lib.videos.filter((video) => video.droppedAt != null).length,
+  0,
+);
+
 const { library: truncatedLib, stats: truncatedStats } = mergeWatchLaterLibrary(
   previous665,
   scrape100,
@@ -473,7 +490,10 @@ assert.match(sidebarTs, /not something you marked/);
 
 const popupJs = readFileSync(join(root, "../extension/popup.js"), "utf8");
 const backgroundJs = readFileSync(join(root, "../extension/background.js"), "utf8");
+const manifest = JSON.parse(readFileSync(join(root, "../extension/manifest.json"), "utf8"));
 const syncJs = readFileSync(join(root, "../api/sync.js"), "utf8");
+assert.equal(manifest.version, "1.2.1");
+assert.match(backgroundJs, /previousOnListCount/);
 assert.match(syncJs, /body\.resetDropped === true/);
 assert.match(backgroundJs, /resetDroppedPending/);
 assert.match(backgroundJs, /resetDropped: true/);
