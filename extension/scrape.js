@@ -11,11 +11,15 @@
     month: 30 * 86_400_000,
     year: 365 * 86_400_000,
   };
+  const FIRST_PAGE_MAX = 120;
+  const TRUNCATED_RATIO = 0.8;
+  const TRUNCATED_MIN_EXPECTED = 50;
 
   function textOf(node) {
     if (!node) return "";
     if (typeof node === "string") return node;
     if (typeof node.simpleText === "string") return node.simpleText;
+    if (typeof node.content === "string") return node.content;
     if (Array.isArray(node.runs)) {
       return node.runs.map((run) => run.text ?? "").join("");
     }
@@ -80,7 +84,47 @@
         if (Number.isFinite(Number(pct))) return Number(pct);
       }
     }
+    return findPercentDurationWatched(renderer);
+  }
+
+  function findPercentDurationWatched(node, depth = 0) {
+    if (!node || typeof node !== "object" || depth > 8) return 0;
+    const direct = node.percentDurationWatched;
+    if (Number.isFinite(Number(direct))) return Number(direct);
+    const kids = Array.isArray(node) ? node : Object.values(node);
+    for (const child of kids) {
+      const found = findPercentDurationWatched(child, depth + 1);
+      if (found) return found;
+    }
     return 0;
+  }
+
+  function videoRecord({
+    id,
+    title,
+    author,
+    duration,
+    durationSec,
+    watchedPct,
+    start,
+    savedRank,
+    index,
+    publishedLabel,
+  }) {
+    return {
+      id,
+      title: title || "",
+      author: author || "",
+      duration: duration || "",
+      durationSec: durationSec || 0,
+      watchedPct: Number.isFinite(Number(watchedPct)) ? Number(watchedPct) : 0,
+      t: Number.isFinite(Number(start)) ? Number(start) : undefined,
+      savedRank: Number.isFinite(savedRank) && savedRank >= 0 ? savedRank : null,
+      index: Number.isFinite(index) && index >= 1 ? index : undefined,
+      publishedLabel: publishedLabel || null,
+      publishedTimeText: publishedLabel || null,
+      publishedAt: parsePublishedRelative(publishedLabel),
+    };
   }
 
   function normalizeRenderer(renderer) {
@@ -93,7 +137,7 @@
     const savedRank = savedRankFromRenderer(renderer);
     const indexText = textOf(renderer.index).trim();
     const index = Number.parseInt(indexText, 10);
-    return {
+    return videoRecord({
       id,
       title: textOf(renderer.title),
       author:
@@ -103,13 +147,95 @@
       duration: durationText,
       durationSec,
       watchedPct: watchedPctFromRenderer(renderer),
-      t: Number.isFinite(Number(start)) ? Number(start) : undefined,
+      start,
       savedRank,
-      index: Number.isFinite(index) && index >= 1 ? index : undefined,
-      publishedLabel: publishedLabel || null,
-      publishedTimeText: publishedLabel || null,
-      publishedAt: parsePublishedRelative(publishedLabel),
-    };
+      index,
+      publishedLabel,
+    });
+  }
+
+  function collectStrings(node, texts, depth, maxDepth) {
+    if (!node || typeof node !== "object" || depth > maxDepth) return;
+    if (typeof node.content === "string") texts.push(node.content);
+    if (typeof node.simpleText === "string") texts.push(node.simpleText);
+    if (typeof node.text === "string") texts.push(node.text);
+    if (Array.isArray(node.runs)) texts.push(textOf(node));
+    const kids = Array.isArray(node) ? node : Object.values(node);
+    for (const child of kids) {
+      if (child && typeof child === "object") {
+        collectStrings(child, texts, depth + 1, maxDepth);
+      }
+    }
+  }
+
+  function durationFromLockup(lockup) {
+    const texts = [];
+    collectStrings(lockup?.contentImage, texts, 0, 8);
+    for (const text of texts) {
+      const trimmed = String(text).trim();
+      if (/^\d+:\d{2}(?::\d{2})?$/.test(trimmed)) return trimmed;
+    }
+    return "";
+  }
+
+  function authorAndPublishedFromLockup(lockup) {
+    const rows =
+      lockup?.metadata?.lockupMetadataViewModel?.metadata?.contentMetadataViewModel
+        ?.metadataRows;
+    const labels = [];
+    if (Array.isArray(rows)) {
+      for (const row of rows) {
+        const parts = row?.metadataParts;
+        if (!Array.isArray(parts)) continue;
+        for (const part of parts) {
+          const text = textOf(part.text) || textOf(part);
+          if (text) labels.push(text);
+        }
+      }
+    }
+    const publishedLabel = labels.map(extractRelativePublished).find(Boolean) || "";
+    return { author: labels[0] || "", publishedLabel };
+  }
+
+  function normalizeLockup(lockup) {
+    if (!lockup || typeof lockup !== "object") return null;
+    const contentType = lockup.contentType;
+    if (contentType && contentType !== "LOCKUP_CONTENT_TYPE_VIDEO") return null;
+    const watch =
+      lockup.rendererContext?.commandContext?.onTap?.innertubeCommand?.watchEndpoint;
+    const id =
+      (typeof watch?.videoId === "string" && watch.videoId) ||
+      (typeof lockup.contentId === "string" ? lockup.contentId : null);
+    if (!id) return null;
+    const duration = durationFromLockup(lockup);
+    const { author, publishedLabel } = authorAndPublishedFromLockup(lockup);
+    return videoRecord({
+      id,
+      title: textOf(lockup.metadata?.lockupMetadataViewModel?.title),
+      author,
+      duration,
+      durationSec: parseDuration(duration),
+      watchedPct: findPercentDurationWatched(lockup),
+      start: watch?.startTimeSeconds,
+      savedRank: null,
+      publishedLabel,
+    });
+  }
+
+  function itemVideoRenderer(item) {
+    return (
+      item?.playlistVideoRenderer ||
+      item?.playlistPanelVideoRenderer ||
+      item?.richItemRenderer?.content?.playlistVideoRenderer ||
+      item?.richItemRenderer?.content?.videoRenderer
+    );
+  }
+
+  function itemLockup(item) {
+    return (
+      item?.lockupViewModel ||
+      item?.richItemRenderer?.content?.lockupViewModel
+    );
   }
 
   function isWatchLaterPlaylist(renderer) {
@@ -117,20 +243,51 @@
     if (renderer.playlistId === "WL") return true;
     for (const item of renderer.contents) {
       const playlistId =
-        item?.playlistVideoRenderer?.navigationEndpoint?.watchEndpoint?.playlistId;
+        item?.playlistVideoRenderer?.navigationEndpoint?.watchEndpoint?.playlistId ||
+        itemLockup(item)?.rendererContext?.commandContext?.onTap?.innertubeCommand
+          ?.watchEndpoint?.playlistId;
       if (playlistId === "WL") return true;
     }
     return false;
   }
 
+  function tokenFromCommand(command) {
+    if (!command || typeof command !== "object") return null;
+    if (typeof command.continuationCommand?.token === "string") {
+      return command.continuationCommand.token;
+    }
+    if (typeof command.token === "string" && command.continuationCommand == null) {
+      if (command.request || command.clickTrackingParams) return command.token;
+    }
+    const nested = command.commandExecutorCommand?.commands;
+    if (Array.isArray(nested)) {
+      for (const inner of nested) {
+        const token = tokenFromCommand(inner);
+        if (token) return token;
+      }
+    }
+    if (command.innertubeCommand) {
+      const token = tokenFromCommand(command.innertubeCommand);
+      if (token) return token;
+    }
+    return null;
+  }
+
   function continuationToken(node) {
     if (!node || typeof node !== "object") return null;
     const renderer = node.continuationItemRenderer;
+    const viewModel = node.continuationItemViewModel;
     return (
-      renderer?.continuationEndpoint?.continuationCommand?.token ||
-      renderer?.button?.buttonRenderer?.command?.continuationCommand?.token ||
+      tokenFromCommand(renderer?.continuationEndpoint) ||
+      tokenFromCommand(renderer?.button?.buttonRenderer?.command) ||
+      tokenFromCommand(viewModel?.continuationCommand) ||
+      (typeof viewModel?.continuationCommand?.token === "string"
+        ? viewModel.continuationCommand.token
+        : null) ||
+      tokenFromCommand(viewModel?.continuationCommand?.innertubeCommand) ||
       node.FAKESECRET_o1p2q3r4s5t6u7v8w9x0?.continuation ||
       node.nextContinuationData?.continuation ||
+      tokenFromCommand(node) ||
       (typeof node.continuationCommand?.token === "string"
         ? node.continuationCommand.token
         : null) ||
@@ -150,14 +307,22 @@
     return next;
   }
 
+  function collectVideoFromItem(item, videos) {
+    const renderer = itemVideoRenderer(item);
+    if (renderer) {
+      const video = normalizeRenderer(renderer);
+      if (video) videos.push(video);
+      return;
+    }
+    const video = normalizeLockup(itemLockup(item));
+    if (video) videos.push(video);
+  }
+
   function collectFromItems(items, videos) {
     let next = null;
     if (!Array.isArray(items)) return next;
     for (const item of items) {
-      if (item?.playlistVideoRenderer) {
-        const video = normalizeRenderer(item.playlistVideoRenderer);
-        if (video) videos.push(video);
-      }
+      collectVideoFromItem(item, videos);
       const token = continuationToken(item);
       if (token) next = token;
     }
@@ -194,6 +359,9 @@
         : []),
       ...(Array.isArray(payload?.onResponseReceivedEndpoints)
         ? payload.onResponseReceivedEndpoints
+        : []),
+      ...(Array.isArray(payload?.onResponseReceivedCommands)
+        ? payload.onResponseReceivedCommands
         : []),
     ];
     for (const action of received) {
@@ -234,8 +402,16 @@
       if (seen.has(node)) continue;
       seen.add(node);
 
-      if (node.playlistVideoRenderer) {
-        const video = normalizeRenderer(node.playlistVideoRenderer);
+      if (node.playlistVideoRenderer || node.playlistPanelVideoRenderer) {
+        const video = normalizeRenderer(
+          node.playlistVideoRenderer || node.playlistPanelVideoRenderer,
+        );
+        if (video) videos.push(video);
+        continue;
+      }
+
+      if (node.lockupViewModel) {
+        const video = normalizeLockup(node.lockupViewModel);
         if (video) videos.push(video);
         continue;
       }
@@ -337,6 +513,66 @@
     return continued || next;
   }
 
+  function countFromVideoLabel(text) {
+    if (typeof text !== "string") return null;
+    const match = text.replace(/,/g, "").match(/(\d+)\s+videos?/i);
+    if (!match) return null;
+    const n = Number(match[1]);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
+  function playlistCountHint(payload) {
+    const texts = [];
+    const stack = [payload?.header, payload?.sidebar, payload?.metadata];
+    const seen = new Set();
+    let guard = 0;
+    while (stack.length && guard < 400) {
+      guard += 1;
+      const node = stack.pop();
+      if (!node || typeof node !== "object" || seen.has(node)) continue;
+      seen.add(node);
+      const label = textOf(node);
+      if (label) texts.push(label);
+      const kids = Array.isArray(node) ? node : Object.values(node);
+      for (const child of kids) {
+        if (child && typeof child === "object") stack.push(child);
+      }
+    }
+    for (const text of texts) {
+      const n = countFromVideoLabel(text);
+      if (n) return n;
+    }
+    return null;
+  }
+
+  function looksTruncated(videoCount, options = {}) {
+    const n = Number(videoCount) || 0;
+    if (n <= 0) return true;
+    const expected = Number(options.expectedCount);
+    if (Number.isFinite(expected) && expected >= TRUNCATED_MIN_EXPECTED) {
+      return n < TRUNCATED_RATIO * expected;
+    }
+    const pagesFetched = Number(options.pagesFetched) || 0;
+    return options.method === "innertube" && n <= FIRST_PAGE_MAX && pagesFetched <= 1;
+  }
+
+  function uniqueVideoCount(videos) {
+    const ids = new Set();
+    for (const video of videos || []) {
+      if (video?.id) ids.add(video.id);
+    }
+    return ids.size;
+  }
+
+  function pickRicherScrape(primary, fallback) {
+    if (!fallback?.videos?.length) return primary || null;
+    if (!primary?.videos?.length) return fallback;
+    if (uniqueVideoCount(fallback.videos) > uniqueVideoCount(primary.videos)) {
+      return fallback;
+    }
+    return primary;
+  }
+
   function finalizeRanks(videos) {
     videos.forEach((video, i) => {
       if (!Number.isFinite(video.savedRank) || video.savedRank < 0) {
@@ -345,6 +581,22 @@
     });
     videos.sort((a, b) => a.savedRank - b.savedRank || a.title.localeCompare(b.title));
     return videos;
+  }
+
+  function innertubeHeaders(ytcfg, context) {
+    const headers = { "content-type": "application/json" };
+    const clientName = ytcfg.get?.("INNERTUBE_CONTEXT_CLIENT_NAME");
+    const clientVersion =
+      ytcfg.get?.("INNERTUBE_CLIENT_VERSION") || context?.client?.clientVersion;
+    const visitor = ytcfg.get?.("VISITOR_DATA") || context?.client?.visitorData;
+    const idToken = ytcfg.get?.("ID_TOKEN");
+    if (clientName != null && clientName !== "") {
+      headers["x-youtube-client-name"] = String(clientName);
+    }
+    if (clientVersion) headers["x-youtube-client-version"] = String(clientVersion);
+    if (visitor) headers["x-goog-visitor-id"] = visitor;
+    if (idToken) headers["x-youtube-identity-token"] = idToken;
+    return headers;
   }
 
   async function scrapeInnertube() {
@@ -358,6 +610,7 @@
 
     const videos = [];
     const seen = new Set();
+    const playlistCount = playlistCountHint(initial);
     let continuation = collectInitial(initial, videos);
     for (const video of videos) seen.add(video.id);
 
@@ -366,6 +619,7 @@
     let guard = 0;
     let emptyStreak = 0;
     let previousToken = null;
+    const headers = innertubeHeaders(ytcfg, context);
     while (continuation && guard < MAX_PAGES) {
       if (continuation === previousToken) break;
       previousToken = continuation;
@@ -374,13 +628,14 @@
         `/youtubei/v1/browse?key=${encodeURIComponent(apiKey)}&prettyPrint=false`,
         {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers,
           credentials: "same-origin",
           body: JSON.stringify({ context, continuation }),
         },
       );
       if (!response.ok) break;
       const payload = await response.json();
+      if (payload?.error) break;
       const batch = [];
       continuation = collectContinuations(payload, batch);
       let added = 0;
@@ -399,7 +654,12 @@
     }
 
     if (videos.length === 0) return null;
-    return { videos: finalizeRanks(videos), method: "innertube" };
+    return {
+      videos: finalizeRanks(videos),
+      method: "innertube",
+      pagesFetched: guard,
+      playlistCount,
+    };
   }
 
   function progressFromRow(row) {
@@ -493,14 +753,40 @@
     return /sign in to|want to watch this again later/i.test(text);
   }
 
-  window.__watchLaterScrape = async function watchLaterScrape() {
+  function resolveExpectedCount(options, innertube) {
+    const fromCaller = Number(options?.expectedCount);
+    if (Number.isFinite(fromCaller) && fromCaller > 0) return fromCaller;
+    const fromPlaylist = Number(innertube?.playlistCount);
+    if (Number.isFinite(fromPlaylist) && fromPlaylist > 0) return fromPlaylist;
+    return null;
+  }
+
+  window.__watchLaterScrapeHelpers = {
+    continuationToken,
+    looksTruncated,
+    pickRicherScrape,
+    normalizeLockup,
+    playlistCountHint,
+  };
+
+  window.__watchLaterScrape = async function watchLaterScrape(options = {}) {
     if (!location.href.includes("list=WL")) {
       throw new Error(`Not on Watch Later (${location.href}). Open ${WL_URL}.`);
     }
     const innertube = await scrapeInnertube();
-    if (innertube) return innertube;
+    const expectedCount = resolveExpectedCount(options, innertube);
+    const innertubeTruncated =
+      !innertube ||
+      looksTruncated(innertube.videos.length, {
+        expectedCount,
+        method: innertube.method,
+        pagesFetched: innertube.pagesFetched,
+      });
+    if (innertube && !innertubeTruncated) return innertube;
+
     const dom = await scrapeDom();
-    if (dom) return dom;
+    const picked = pickRicherScrape(innertube, dom);
+    if (picked) return picked;
     if (signedOut()) {
       throw new Error("YouTube is signed out. Sign in to Chrome, then sync again.");
     }
