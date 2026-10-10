@@ -14,6 +14,7 @@ interface SidebarProps {
   onQueryChange: (query: string) => void;
   onSortChange: (sort: SortKey) => void;
   onReset: () => void;
+  onClose: () => void;
 }
 
 function Chip({
@@ -57,9 +58,17 @@ export function Sidebar({
   onQueryChange,
   onSortChange,
   onReset,
+  onClose,
 }: SidebarProps) {
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" id="library-filters">
+      <div className="sheet-grab" aria-hidden="true" />
+      <div className="sheet-bar">
+        <h2>Filters</h2>
+        <button type="button" className="sheet-close" onClick={onClose}>
+          Close
+        </button>
+      </div>
       <div className="sidebar-brand">
         <p className="eyebrow">{live ? "YouTube · live" : "YouTube · snapshot"}</p>
         <h1>Watch Later</h1>
@@ -115,7 +124,7 @@ export function Sidebar({
         </div>
       </section>
 
-      <section className="filter-block">
+      <section className="filter-block filter-search">
         <h2>Search</h2>
         <label className="search-field">
           <span className="sr-only">Search title or author</span>
@@ -130,7 +139,7 @@ export function Sidebar({
         </label>
       </section>
 
-      <section className="filter-block">
+      <section className="filter-block filter-sort">
         <h2>Sort</h2>
         <div className="sort-stack" role="radiogroup" aria-label="Sort videos">
           {SORT_OPTIONS.map((option) => (
