@@ -4,6 +4,7 @@ import { Sidebar } from "./components/Sidebar";
 import { VideoList } from "./components/VideoList";
 import {
   DEFAULT_FILTERS,
+  activeFilterCount,
   categoryCounts,
   filterAndSortVideos,
   statusCounts,
@@ -143,6 +144,7 @@ export default function App() {
         onQueryChange={(query) => setFilters((prev) => ({ ...prev, query }))}
         onSortChange={(sort: SortKey) => setFilters((prev) => ({ ...prev, sort }))}
         onReset={resetFilters}
+        onClose={() => setFiltersOpen(false)}
       />
       <div className="main">
         <Header
@@ -153,7 +155,11 @@ export default function App() {
           live={live}
           partial={partial}
           filtersOpen={filtersOpen}
+          filters={filters}
+          activeFilters={activeFilterCount(filters)}
           onToggleFilters={() => setFiltersOpen((open) => !open)}
+          onQueryChange={(query) => setFilters((prev) => ({ ...prev, query }))}
+          onSortChange={(sort: SortKey) => setFilters((prev) => ({ ...prev, sort }))}
           onRefresh={() => void refreshLibrary()}
         />
         <VideoList

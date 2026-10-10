@@ -34,6 +34,13 @@ export const DEFAULT_FILTERS: LibraryFilters = {
   sort: "saved",
 };
 
+/** Status chips, category chips, the Dropped toggle, and a non-empty search. */
+export function activeFilterCount(filters: LibraryFilters): number {
+  const query = filters.query.trim() ? 1 : 0;
+  const dropped = filters.includeDropped ? 1 : 0;
+  return filters.statuses.length + filters.categories.length + dropped + query;
+}
+
 export function youtubeResumeUrl(video: Video): string {
   return `https://www.youtube.com/watch?v=${video.id}&t=${video.t}s`;
 }

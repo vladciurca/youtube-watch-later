@@ -671,6 +671,51 @@ assert.equal(
   true,
 );
 
+const headerTs = readFileSync(join(root, "../src/components/Header.tsx"), "utf8");
+const indexCss = readFileSync(join(root, "../src/index.css"), "utf8");
+const indexHtml = readFileSync(join(root, "../index.html"), "utf8");
+const manifestWeb = JSON.parse(readFileSync(join(root, "../public/manifest.webmanifest"), "utf8"));
+
+function activeFilterCount(filters) {
+  const query = filters.query.trim() ? 1 : 0;
+  const dropped = filters.includeDropped ? 1 : 0;
+  return filters.statuses.length + filters.categories.length + dropped + query;
+}
+
+assert.match(libraryTs, /export function activeFilterCount/);
+assert.equal(
+  activeFilterCount({
+    statuses: ["Almost finished"],
+    includeDropped: false,
+    categories: ["tech"],
+    query: "",
+    sort: "saved",
+  }),
+  2,
+);
+assert.equal(
+  activeFilterCount({
+    statuses: [],
+    includeDropped: true,
+    categories: [],
+    query: "fund",
+    sort: "published",
+  }),
+  2,
+);
+assert.match(headerTs, /filters-badge/);
+assert.match(headerTs, /mobile-tools/);
+assert.match(headerTs, /Sync incomplete\. Missing videos were kept/);
+assert.match(indexCss, /env\(safe-area-inset-top\)/);
+assert.match(indexCss, /env\(safe-area-inset-bottom\)/);
+assert.match(indexCss, /translateY\(110%\)/);
+assert.match(indexCss, /min-height: 40px/);
+assert.match(indexHtml, /viewport-fit=cover/);
+assert.match(indexHtml, /apple-touch-icon/);
+assert.equal(manifestWeb.display, "standalone");
+assert.ok(manifestWeb.icons.some((icon) => icon.sizes === "180x180"));
+assert.ok(manifestWeb.icons.some((icon) => icon.sizes === "512x512"));
+
 console.log(
-  "library tests: exclusive chips, remaining sort, upsert, dropped, savedRank, publishedAt, categorize, formatRemaining, partial scrape guard, resetDropped repair ok",
+  "library tests: exclusive chips, remaining sort, upsert, dropped, savedRank, publishedAt, categorize, formatRemaining, partial scrape guard, resetDropped repair, phone layout ok",
 );
