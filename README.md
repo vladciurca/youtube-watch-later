@@ -31,13 +31,13 @@ Short version:
 
 Videos that disappear from Watch Later keep their last snapshot and get `droppedAt`. The **Dropped** filter then lists them. That means **not in the last full YouTube WL scrape**, not that you marked the video dropped.
 
-If a scrape looks truncated (fewer than 80% of the previous on-list library, and that library has at least 50 videos), missing videos are **not** marked Dropped. The library is stored with `partial: true` and the UI shows **sync incomplete**. A later full scrape still drops videos that are actually gone.
+If the playlist header states a video count, a scrape is complete only when it collected at least 98% of that count. Otherwise, when the header count is missing, a scrape is treated as truncated if it has fewer than 80% of the previous on-list library and that library has at least 50 videos. A truncated scrape does **not** mark missing videos Dropped. The library is stored with `partial: true` and the UI shows **sync incomplete**. A later full scrape still drops videos that are actually gone.
 
 The first live scrape only read YouTube's first page (~100 videos) and stamped `droppedAt` on the rest of the seeded library. A later ~100-video sync is not treated as partial once only those 100 remain on-list, so the false stamps stuck. The updated extension sends `{ resetDropped: true }` **once** on the next sync (reload unpacked, then Sync Watch Later). That clears current Dropped stamps, then merge runs as usual: videos in the scrape stay on-list; a full scrape re-drops videos that are actually gone; a partial scrape does not mass-drop the restored ones.
 
-Extension 1.2.1 follows current Innertube continuation shapes and falls back to a DOM scroll when an Innertube result still looks like a first-page stall. Reload unpacked (or install `extension/watch-later-sync.zip`) and Sync once; a complete scrape should clear `partial` and the UI banner.
+Extension 1.3.0 follows the current Watch Later Innertube page: `lockupViewModel` rows, the continuation token that sits in the video list (not the empty sibling token), `browse` or `next` from the command's `apiUrl`, and a `SAPISIDHASH` header from the `SAPISID` cookie. It keeps requesting pages until the token runs out, capped at 5,000 videos. If that result is still under 98% of the header count (for example `1,234 videos`), it scrolls the playlist DOM until the row count stops growing. Reload unpacked (or install `extension/watch-later-sync.zip`) and Sync once.
 
-Sync records `savedRank` from Watch Later playlist order (`playlistVideoRenderer.index`, stored 0-based so 0 = newest / top of the YT list). Continuations append in that same playlist order. Dropped videos keep their last rank and sort last under **Saved**.
+`savedRank` is the scraped playlist order (0 = top of Watch Later), not a per-row index and not publish date or time remaining. A partial scrape keeps videos it missed after the scraped ones, in their previous relative order. Dropped videos sort last under **Saved**.
 
 New Watch Later videos get a `category` at sync time from title + channel: majority category channels already in the library, plus keywords. Categories:
 
@@ -97,7 +97,7 @@ npm run preview
 
 - Status: **Almost finished** only (single-select chips; click another status to switch immediately; click the selected chip to show all)
 - Category: **Tech / Business** selected (click another category chip to switch; click the selected chip to show all)
-- Sort: **Saved** — YouTube Watch Later order, newest saved first (`savedRank` 0 is the top of the YT list). Until the first sync, the seed has no rank and **Saved** falls back to **Remaining**. **Remaining** still sorts least leftover time among unfinished videos first, Done / 100% last. Leftover under an hour shows `M:SS` (e.g. `6:00 left`); hours stay `1h 4m left`. **Published** sorts newest upload first, missing dates last. **Watched %** still sorts highest `watchedPct` first
+- Sort: **Saved** — YouTube Watch Later order (`savedRank` 0 is the top of the list). Until the first sync, the seed has no rank and **Saved** keeps the seed's order. **Remaining** sorts least leftover time among unfinished videos first, Done / 100% last. Leftover under an hour shows `M:SS` (e.g. `6:00 left`); hours stay `1h 4m left`. **Published** sorts newest upload first, missing dates last. **Watched %** still sorts highest `watchedPct` first
 
 Click a row to open `https://www.youtube.com/watch?v={id}&t={t}s` in a new tab. That click does not change `watchedPct` or `status`.
 

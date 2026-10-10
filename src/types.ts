@@ -48,7 +48,7 @@ export interface Video {
   url: string;
   remainingSec: number;
   droppedAt: string | null;
-  /** 0 = top of YouTube Watch Later (newest saved). Absent on the unsynced seed. */
+  /** 0 = top of YouTube Watch Later. Absent only on the unsynced seed. */
   savedRank?: number | null;
   /** ISO timestamp parsed from YouTube's relative published string at scrape time. */
   publishedAt?: string | null;

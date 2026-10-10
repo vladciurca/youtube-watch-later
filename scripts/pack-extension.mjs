@@ -9,8 +9,12 @@ const zipPath = join(root, "extension/watch-later-sync.zip");
 
 mkdirSync(outDir, { recursive: true });
 rmSync(zipPath, { force: true });
-execFileSync("zip", ["-r", "-X", zipPath, ".", "-x", "watch-later-sync.zip"], {
-  cwd: join(root, "extension"),
-  stdio: "inherit",
-});
+execFileSync(
+  "zip",
+  ["-r", "-X", zipPath, ".", "-x", "watch-later-sync.zip", "fixtures/*"],
+  {
+    cwd: join(root, "extension"),
+    stdio: "inherit",
+  },
+);
 console.log(`wrote ${zipPath}`);

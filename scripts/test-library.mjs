@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mergeWatchLaterLibrary } from "../api/_lib/merge.mjs";
+import { isPartialWatchLaterScrape, mergeWatchLaterLibrary } from "../api/_lib/merge.mjs";
 import {
   formatRemaining,
   parsePublishedRelative,
@@ -37,16 +37,16 @@ function hasSavedRank(video) {
 }
 
 function compareSaved(a, b) {
-  const aRanked = hasSavedRank(a);
-  const bRanked = hasSavedRank(b);
-  if (!aRanked && !bRanked) return compareRemaining(a, b);
-
   const aDropped = a.droppedAt != null;
   const bDropped = b.droppedAt != null;
   if (aDropped !== bDropped) return aDropped ? 1 : -1;
 
+  const aRanked = hasSavedRank(a);
+  const bRanked = hasSavedRank(b);
   if (aRanked !== bRanked) return aRanked ? -1 : 1;
-  return a.savedRank - b.savedRank || a.title.localeCompare(b.title);
+  if (!aRanked || !bRanked) return 0;
+  if (a.savedRank !== b.savedRank) return a.savedRank - b.savedRank;
+  return 0;
 }
 
 // Exclusive status chips
@@ -189,11 +189,12 @@ assert.match(libraryTs, /key: "saved", label: "Saved"/);
 assert.match(libraryTs, /sort: "saved"/);
 
 const seedSaved = [...seed.videos].sort(compareSaved);
-const seedRemaining = [...seed.videos].sort(compareRemaining);
 assert.deepEqual(
   seedSaved.map((video) => video.id),
-  seedRemaining.map((video) => video.id),
+  seed.videos.map((video) => video.id),
 );
+assert.match(libraryTs, /if \(!aRanked \|\| !bRanked\) return 0/);
+assert.doesNotMatch(libraryTs, /if \(!aRanked && !bRanked\) return compareRemaining/);
 
 const ranked = [
   { id: "c", title: "Oldest", remainingSec: 5, savedRank: 2, droppedAt: null },
@@ -224,20 +225,21 @@ const vid = (id, extra = {}) => ({
   ...extra,
 });
 
-// savedRank from playlistVideoRenderer.index (1-based → 0-based), not scrape insertion order
+// Playlist order is the scraped array order. A repeated index of 1 must not
+// pull a later video up to savedRank 0 (that is what put Brian Singerman first).
 const { library: fromIndex } = mergeWatchLaterLibrary(
   [],
   [
-    vid("ccccccccccc", { title: "Third", index: 3 }),
-    vid("aaaaaaaaaaa", { title: "First", index: 1 }),
-    vid("bbbbbbbbbbb", { title: "Second", savedRank: 1 }),
+    vid("ccccccccccc", { title: "Third in list", index: 1, savedRank: 0 }),
+    vid("aaaaaaaaaaa", { title: "First in list", index: 1 }),
+    vid("bbbbbbbbbbb", { title: "Second in list", savedRank: 50 }),
   ],
   syncedAt,
 );
 const fromIndexById = Object.fromEntries(fromIndex.videos.map((video) => [video.id, video]));
-assert.equal(fromIndexById.aaaaaaaaaaa.savedRank, 0);
-assert.equal(fromIndexById.bbbbbbbbbbb.savedRank, 1);
-assert.equal(fromIndexById.ccccccccccc.savedRank, 2);
+assert.equal(fromIndexById.ccccccccccc.savedRank, 0);
+assert.equal(fromIndexById.aaaaaaaaaaa.savedRank, 1);
+assert.equal(fromIndexById.bbbbbbbbbbb.savedRank, 2);
 
 // publishedAt parse at scrape/merge time; preserve previous if a later scrape omits it
 const now = Date.parse("2026-08-27T20:00:00.000Z");
@@ -250,6 +252,14 @@ assert.equal(
   new Date(now - 5 * 3_600_000).toISOString(),
 );
 assert.equal(parsePublishedRelative("not a date", now), null);
+assert.equal(
+  parsePublishedRelative("4mo ago", now),
+  new Date(now - 4 * 30 * 86_400_000).toISOString(),
+);
+assert.equal(
+  parsePublishedRelative("2y ago", now),
+  new Date(now - 2 * 365 * 86_400_000).toISOString(),
+);
 
 const { library: withPublished } = mergeWatchLaterLibrary(
   [],
@@ -492,9 +502,14 @@ const popupJs = readFileSync(join(root, "../extension/popup.js"), "utf8");
 const backgroundJs = readFileSync(join(root, "../extension/background.js"), "utf8");
 const manifest = JSON.parse(readFileSync(join(root, "../extension/manifest.json"), "utf8"));
 const syncJs = readFileSync(join(root, "../api/sync.js"), "utf8");
-assert.equal(manifest.version, "1.2.1");
+assert.equal(manifest.version, "1.3.0");
 assert.match(backgroundJs, /previousOnListCount/);
+assert.match(backgroundJs, /statedCount/);
+assert.match(syncJs, /body\.statedCount/);
 assert.match(syncJs, /body\.resetDropped === true/);
+assert.match(popupJs, /Scraped \$\{scrapedCount\}/);
+assert.match(popupJs, /\(stated\)/);
+assert.match(popupJs, /method \$\{result\.method\}/);
 assert.match(backgroundJs, /resetDroppedPending/);
 assert.match(backgroundJs, /resetDropped: true/);
 assert.match(popupJs, /Restoring Dropped from the incomplete first-page scrape/);
@@ -563,6 +578,98 @@ assert.equal(
 );
 assert.equal(resetFullLib.videos.find((video) => video.id === mergeId(0)).droppedAt, null);
 assert.equal(resetFullLib.videos.find((video) => video.id === mergeId(100)).droppedAt, null);
+
+// Partial scrape: scraped order wins even when a later video claims rank/index 0.
+// Videos missing from the scrape keep their previous relative order after it.
+const partialPrev = [
+  vid("aaaaaaaaaaa", { title: "Fostul patron", savedRank: 0, durationSec: 1000, watchedPct: 0 }),
+  vid("bbbbbbbbbbb", { title: "Kept earlier", savedRank: 1, durationSec: 100, watchedPct: 0 }),
+  vid("ccccccccccc", { title: "Kept later", savedRank: 5, durationSec: 10, watchedPct: 90 }),
+  vid("ddddddddddd", {
+    title: "No previous rank",
+    durationSec: 50,
+    watchedPct: 0,
+    publishedAt: "2026-10-01T00:00:00.000Z",
+  }),
+];
+const { library: partialOrder, stats: partialOrderStats } = mergeWatchLaterLibrary(
+  partialPrev,
+  [
+    vid("aaaaaaaaaaa", { title: "Fostul patron", savedRank: 4, index: 9 }),
+    vid("eeeeeeeeeee", {
+      title: "Brian Singerman on Founders Fund, GPx, and Looking for Greatness | Ep. 56",
+      savedRank: 0,
+      index: 1,
+    }),
+  ],
+  syncedAt,
+  { statedCount: 692 },
+);
+assert.equal(partialOrderStats.partial, true);
+assert.equal(partialOrderStats.dropped, 0);
+assert.equal(partialOrderStats.statedCount, 692);
+assert.deepEqual(
+  partialOrder.videos.map((video) => video.id),
+  ["aaaaaaaaaaa", "eeeeeeeeeee", "bbbbbbbbbbb", "ccccccccccc", "ddddddddddd"],
+);
+assert.deepEqual(
+  partialOrder.videos.map((video) => video.savedRank),
+  [0, 1, 2, 3, 4],
+);
+const partialSorted = [...partialOrder.videos].sort(compareSaved).map((video) => video.id);
+assert.deepEqual(partialSorted, [
+  "aaaaaaaaaaa",
+  "eeeeeeeeeee",
+  "bbbbbbbbbbb",
+  "ccccccccccc",
+  "ddddddddddd",
+]);
+
+// Equal savedRank keeps list order. Title and remaining time do not float Brian first.
+const tied = [
+  { id: "fostul", title: "Fostul patron", savedRank: 0, remainingSec: 3000, droppedAt: null },
+  {
+    id: "brian",
+    title: "Brian Singerman on Founders Fund",
+    savedRank: 0,
+    remainingSec: 10,
+    droppedAt: null,
+    publishedAt: "2026-09-01T00:00:00.000Z",
+  },
+  {
+    id: "tailLate",
+    title: "Tail with lots left",
+    remainingSec: 9000,
+    droppedAt: null,
+    publishedAt: "2020-01-01T00:00:00.000Z",
+  },
+  {
+    id: "tailSoon",
+    title: "Tail almost done",
+    remainingSec: 1,
+    droppedAt: null,
+    publishedAt: "2026-10-01T00:00:00.000Z",
+  },
+];
+assert.deepEqual([...tied].sort(compareSaved).map((video) => video.id), [
+  "fostul",
+  "brian",
+  "tailLate",
+  "tailSoon",
+]);
+
+assert.equal(
+  isPartialWatchLaterScrape(Array.from({ length: 100 }, (_, i) => previousLibraryVideo(i)), 98, 100),
+  false,
+);
+assert.equal(
+  isPartialWatchLaterScrape(Array.from({ length: 100 }, (_, i) => previousLibraryVideo(i)), 97, 100),
+  true,
+);
+assert.equal(
+  isPartialWatchLaterScrape(Array.from({ length: 692 }, (_, i) => previousLibraryVideo(i)), 117, 692),
+  true,
+);
 
 console.log(
   "library tests: exclusive chips, remaining sort, upsert, dropped, savedRank, publishedAt, categorize, formatRemaining, partial scrape guard, resetDropped repair ok",

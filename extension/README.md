@@ -26,12 +26,12 @@ You can also unzip `extension/watch-later-sync.zip` and load that folder the sam
 
 1. Stay signed into YouTube in Chrome
 2. Click **Sync Watch Later**
-3. The extension opens or focuses the Watch Later playlist, reads the WL playlist contents (not a generic tree-walk), follows Innertube continuations past the first ~100 videos (`continuationItemRenderer`, `commandExecutorCommand`, and `continuationItemViewModel` tokens; `playlistVideoRenderer` and `lockupViewModel` items), and records playlist order, progress bars, and published dates, then upserts by video id
-4. If Innertube still looks truncated (about one page, or under 80% of the previously known on-list size / playlist header count), it automatically falls back to scrolling the DOM and keeps whichever scrape has more unique videos
-5. Refresh the site. Videos gone from Watch Later keep their last snapshot and appear under **Dropped** (not in the last full YouTube WL scrape). A truncated scrape does not mass-drop the rest of the library.
+3. The extension opens or focuses the Watch Later playlist, reads the WL playlist in list order (`playlistVideoRenderer` and `lockupViewModel`), and follows the continuation token that sits in that list. A second sibling token that returns an empty body is ignored. Requests use the WEB client context (`clientVersion` and `visitorData` from `ytcfg`) and a `SAPISIDHASH` header built from the `SAPISID` cookie. Pagination stops when the token runs out, or at 5,000 videos
+4. The popup reports `Scraped N of M (stated), method innertube` (or `dom`). `M` is the playlist header count, such as `1,234 videos`. If Innertube is under 98% of that count, the extension scrolls the playlist until the row count stops growing and keeps whichever scrape has more unique videos
+5. Refresh the site. `savedRank` matches that scraped order. Videos the scrape missed stay after those, in their previous order. Videos gone from a full Watch Later scrape keep their last snapshot and appear under **Dropped**. A short scrape does not mass-drop the rest of the library
 
-## Verify a full scrape (v1.2.1)
+## Verify a full scrape (v1.3.0)
 
 1. `chrome://extensions` → reload the unpacked `extension/` folder, or unzip `extension/watch-later-sync.zip` and load that folder
 2. Stay signed into YouTube, then click **Sync Watch Later** once on `https://www.youtube.com/playlist?list=WL`
-3. Refresh the library. Expect `partial: false` on `/api/library`, no “Sync incomplete” banner, and a scraped count near the full Watch Later size (not stuck at ~100 with `savedRank` only on the first page)
+3. The popup should show a scraped count near the header's video count, and the method used. Refresh the library. Expect `partial: false` on `/api/library` when the scrape reached about 98% of that count, no “Sync incomplete” banner, and **Saved** order matching Watch Later from top to bottom
