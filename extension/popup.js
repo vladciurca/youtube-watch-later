@@ -55,12 +55,17 @@ syncButton.addEventListener("click", async () => {
     }
     const restored =
       result.resetDropped === true
-        ? `Restored ${result.clearedDropped ?? 0} Dropped stamps from the first-page scrape, then `
+        ? `Restored ${result.clearedDropped ?? 0} Dropped stamps from the first-page scrape. `
         : "";
+    const scrapedCount = result.scraped ?? result.upserted;
+    const stated = Number(result.statedCount);
+    const ofStated =
+      Number.isFinite(stated) && stated > 0 ? ` of ${stated} (stated)` : "";
+    const method = result.method ? `, method ${result.method}` : "";
     setStatus(
       result.partial
-        ? `${restored}synced ${result.upserted} videos (${result.method}), but the scrape looked incomplete. Previous Watch Later entries were kept. Sync again, then refresh the library.`
-        : `${restored}synced ${result.upserted} videos (${result.method}). ${result.dropped} marked Dropped. Refresh the library.`,
+        ? `${restored}Scraped ${scrapedCount}${ofStated}${method}. The scrape looked incomplete, so previous Watch Later entries were kept. Sync again, then refresh the library.`
+        : `${restored}Scraped ${scrapedCount}${ofStated}${method}. ${result.dropped} marked Dropped. Refresh the library.`,
       "ok",
     );
   } catch (error) {

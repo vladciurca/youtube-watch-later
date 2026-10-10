@@ -61,7 +61,19 @@ export function formatRemaining(seconds) {
 }
 
 const RELATIVE_DATE_RE =
-  /(?:(?:streamed|premiered)\s+)?(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago/i;
+  /(?:(?:streamed|premiered)\s+)?(\d+)\s*(months?|weeks?|days?|hours?|minutes?|seconds?|years?|mos|mo|wks?|hrs?|mins?|secs?|yrs?|[dhsmyw])\s+ago/i;
+
+function normalizeRelativeUnit(unit) {
+  const u = String(unit || "").toLowerCase();
+  if (u === "mo" || u === "mos" || u.startsWith("month")) return "month";
+  if (u === "m" || u.startsWith("min")) return "minute";
+  if (u === "y" || u.startsWith("yr") || u.startsWith("year")) return "year";
+  if (u === "w" || u.startsWith("wk") || u.startsWith("week")) return "week";
+  if (u === "d" || u.startsWith("day")) return "day";
+  if (u === "h" || u.startsWith("hr") || u.startsWith("hour")) return "hour";
+  if (u === "s" || u.startsWith("sec") || u.startsWith("second")) return "second";
+  return null;
+}
 
 const UNIT_MS = {
   second: 1000,
@@ -86,9 +98,9 @@ export function parsePublishedRelative(text, now = Date.now()) {
   if (/^just now$/i.test(cleaned)) return new Date(now).toISOString();
   const match = cleaned.match(RELATIVE_DATE_RE);
   if (!match) return null;
-  const n = Number(match[1]);
-  const unit = match[2].toLowerCase();
-  const ms = UNIT_MS[unit];
+    const n = Number(match[1]);
+    const unit = normalizeRelativeUnit(match[2]);
+    const ms = unit ? UNIT_MS[unit] : 0;
   if (!Number.isFinite(n) || n < 0 || !ms) return null;
   return new Date(now - n * ms).toISOString();
 }

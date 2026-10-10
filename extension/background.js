@@ -106,14 +106,19 @@ async function markResetDroppedDone() {
   await chrome.storage.local.set({ [RESET_DROPPED_PENDING_KEY]: false });
 }
 
-async function postSync(apiUrl, syncSecret, videos, resetDropped) {
+async function postSync(apiUrl, syncSecret, videos, resetDropped, statedCountValue) {
+  const statedCount = Number(statedCountValue);
   const response = await fetch(`${apiUrl}/api/sync`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-sync-secret": syncSecret,
     },
-    body: JSON.stringify({ videos, ...(resetDropped ? { resetDropped: true } : {}) }),
+    body: JSON.stringify({
+      videos,
+      ...(Number.isFinite(statedCount) && statedCount > 0 ? { statedCount } : {}),
+      ...(resetDropped ? { resetDropped: true } : {}),
+    }),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -139,17 +144,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       throw new Error("No Watch Later videos were scraped.");
     }
     const resetDropped = await shouldResetDropped();
-    const result = await postSync(apiUrl, syncSecret, scraped.videos, resetDropped);
+    const result = await postSync(
+      apiUrl,
+      syncSecret,
+      scraped.videos,
+      resetDropped,
+      scraped.statedCount,
+    );
     if (resetDropped && result.resetDropped === true) {
       await markResetDroppedDone();
     }
     return {
       ok: true,
+      ...result,
       method: scraped.method,
       scraped: scraped.videos.length,
+      statedCount: scraped.statedCount ?? result.statedCount ?? null,
       resetDropped: result.resetDropped === true,
       clearedDropped: result.clearedDropped ?? 0,
-      ...result,
     };
   })()
     .then(sendResponse)

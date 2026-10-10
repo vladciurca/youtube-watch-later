@@ -1,0 +1,80 @@
+{
+  "onResponseReceivedActions": [
+    {
+      "appendContinuationItemsAction": {
+        "continuationItems": [
+          {
+            "lockupViewModel": {
+              "contentId": "ccccccccccc",
+              "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+              "metadata": {
+                "lockupMetadataViewModel": {
+                  "title": { "content": "Third from continuation" },
+                  "metadata": {
+                    "contentMetadataViewModel": {
+                      "metadataRows": [
+                        {
+                          "metadataParts": [
+                            { "text": { "content": "Channel Three" } }
+                          ]
+                        },
+                        {
+                          "metadataParts": [
+                            { "text": { "content": "1 day ago" } }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                }
+              },
+              "contentImage": {
+                "thumbnailViewModel": {
+                  "overlays": [
+                    {
+                      "thumbnailBottomOverlayViewModel": {
+                        "badges": [
+                          { "thumbnailBadgeViewModel": { "text": "5:00" } }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              },
+              "rendererContext": {
+                "commandContext": {
+                  "onTap": {
+                    "innertubeCommand": {
+                      "watchEndpoint": {
+                        "videoId": "ccccccccccc",
+                        "playlistId": "WL",
+                        "index": 2
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "continuationItemViewModel": {
+              "continuationCommand": {
+                "innertubeCommand": {
+                  "commandMetadata": {
+                    "webCommandMetadata": {
+                      "apiUrl": "/youtubei/v1/next"
+                    }
+                  },
+                  "continuationCommand": {
+                    "token": "tok-next-endpoint",
+                    "request": "CONTINUATION_REQUEST_TYPE_BROWSE"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

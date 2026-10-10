@@ -1,0 +1,214 @@
+{
+  "header": {
+    "pageHeaderRenderer": {
+      "content": {
+        "pageHeaderViewModel": {
+          "title": { "dynamicTextViewModel": { "text": { "content": "Watch later" } } },
+          "metadata": {
+            "contentMetadataViewModel": {
+              "metadataRows": [
+                {
+                  "metadataParts": [
+                    { "text": { "content": "Playlist" } },
+                    { "text": { "content": "1,234 videos" } }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "sidebar": {
+    "playlistSidebarRenderer": {
+      "items": [
+        {
+          "playlistSidebarPrimaryInfoRenderer": {
+            "stats": [
+              {
+                "runs": [{ "text": "1,234" }, { "text": " videos" }]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "contents": {
+    "twoColumnBrowseResultsRenderer": {
+      "tabs": [
+        {
+          "tabRenderer": {
+            "content": {
+              "sectionListRenderer": {
+                "contents": [
+                  {
+                    "itemSectionRenderer": {
+                      "contents": [
+                        {
+                          "lockupViewModel": {
+                            "contentId": "aaaaaaaaaaa",
+                            "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+                            "metadata": {
+                              "lockupMetadataViewModel": {
+                                "title": { "content": "First on Watch Later" },
+                                "metadata": {
+                                  "contentMetadataViewModel": {
+                                    "metadataRows": [
+                                      {
+                                        "metadataParts": [
+                                          { "text": { "content": "Channel One" } }
+                                        ]
+                                      },
+                                      {
+                                        "metadataParts": [
+                                          { "text": { "content": "12K" } },
+                                          {
+                                            "text": { "content": "4mo ago" },
+                                            "accessibilityLabel": "4 months ago"
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            },
+                            "contentImage": {
+                              "thumbnailViewModel": {
+                                "overlays": [
+                                  {
+                                    "thumbnailBottomOverlayViewModel": {
+                                      "badges": [
+                                        { "thumbnailBadgeViewModel": { "text": "1:02:39" } }
+                                      ]
+                                    }
+                                  },
+                                  {
+                                    "thumbnailOverlayResumePlaybackRenderer": {
+                                      "percentDurationWatched": 10
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            "rendererContext": {
+                              "commandContext": {
+                                "onTap": {
+                                  "innertubeCommand": {
+                                    "watchEndpoint": {
+                                      "videoId": "aaaaaaaaaaa",
+                                      "playlistId": "WL",
+                                      "index": 0,
+                                      "startTimeSeconds": 2
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "lockupViewModel": {
+                            "contentId": "bbbbbbbbbbb",
+                            "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+                            "metadata": {
+                              "lockupMetadataViewModel": {
+                                "title": { "content": "Second on Watch Later" },
+                                "metadata": {
+                                  "contentMetadataViewModel": {
+                                    "metadataRows": [
+                                      {
+                                        "metadataParts": [
+                                          { "text": { "content": "Channel Two" } }
+                                        ]
+                                      },
+                                      {
+                                        "metadataParts": [
+                                          { "text": { "content": "2 weeks ago" } }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            },
+                            "contentImage": {
+                              "thumbnailViewModel": {
+                                "overlays": [
+                                  {
+                                    "thumbnailBottomOverlayViewModel": {
+                                      "badges": [
+                                        { "thumbnailBadgeViewModel": { "text": "10:00" } }
+                                      ]
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            "rendererContext": {
+                              "commandContext": {
+                                "onTap": {
+                                  "innertubeCommand": {
+                                    "watchEndpoint": {
+                                      "videoId": "bbbbbbbbbbb",
+                                      "playlistId": "WL",
+                                      "index": 0
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "continuationItemViewModel": {
+                            "trigger": "CONTINUATION_TRIGGER_ON_ITEM_SHOWN",
+                            "continuationCommand": {
+                              "innertubeCommand": {
+                                "commandMetadata": {
+                                  "webCommandMetadata": {
+                                    "sendPost": true,
+                                    "apiUrl": "/youtubei/v1/browse"
+                                  }
+                                },
+                                "continuationCommand": {
+                                  "token": "tok-in-list",
+                                  "request": "CONTINUATION_REQUEST_TYPE_BROWSE"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "continuationItemViewModel": {
+                      "trigger": "CONTINUATION_TRIGGER_ON_ITEM_SHOWN",
+                      "continuationCommand": {
+                        "innertubeCommand": {
+                          "commandMetadata": {
+                            "webCommandMetadata": {
+                              "sendPost": true,
+                              "apiUrl": "/youtubei/v1/browse"
+                            }
+                          },
+                          "continuationCommand": {
+                            "token": "tok-empty-sibling",
+                            "request": "CONTINUATION_REQUEST_TYPE_BROWSE"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

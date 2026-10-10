@@ -1,0 +1,36 @@
+{
+  "onResponseReceivedEndpoints": [
+    {
+      "commandExecutorCommand": {
+        "commands": [
+          {
+            "appendContinuationItemsAction": {
+              "continuationItems": [
+                {
+                  "playlistVideoRenderer": {
+                    "videoId": "fffffffffff",
+                    "title": { "simpleText": "Appended old shape" },
+                    "shortBylineText": { "simpleText": "Old Channel" },
+                    "lengthText": { "simpleText": "1:30" },
+                    "index": { "simpleText": "1" },
+                    "navigationEndpoint": {
+                      "watchEndpoint": { "videoId": "fffffffffff", "playlistId": "WL" }
+                    }
+                  }
+                },
+                {
+                  "continuationItemRenderer": {
+                    "continuationEndpoint": {
+                      "continuationCommand": { "token": "tok-old-page-2" }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "onResponseReceivedActions": []
+}

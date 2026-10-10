@@ -35,11 +35,15 @@ export default async function handler(req, res) {
   try {
     const existing = await loadExistingLibrary(req);
     const syncedAt = new Date().toISOString();
+    const statedCount = Number(body.statedCount);
     const { library, stats } = mergeWatchLaterLibrary(
       existing.videos ?? [],
       scraped,
       syncedAt,
-      { resetDropped },
+      {
+        resetDropped,
+        ...(Number.isFinite(statedCount) && statedCount > 0 ? { statedCount } : {}),
+      },
     );
     await saveLiveLibrary(library);
     json(res, 200, { ok: true, ...stats, syncedAt });

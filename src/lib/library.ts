@@ -149,16 +149,16 @@ function compareRemaining(a: Video, b: Video): number {
 }
 
 function compareSaved(a: Video, b: Video): number {
-  const aRanked = hasSavedRank(a);
-  const bRanked = hasSavedRank(b);
-  if (!aRanked && !bRanked) return compareRemaining(a, b);
-
   const aDropped = a.droppedAt != null;
   const bDropped = b.droppedAt != null;
   if (aDropped !== bDropped) return aDropped ? 1 : -1;
 
+  const aRanked = hasSavedRank(a);
+  const bRanked = hasSavedRank(b);
   if (aRanked !== bRanked) return aRanked ? -1 : 1;
-  return (a.savedRank as number) - (b.savedRank as number) || a.title.localeCompare(b.title);
+  if (!aRanked || !bRanked) return 0;
+  if (a.savedRank !== b.savedRank) return (a.savedRank as number) - (b.savedRank as number);
+  return 0;
 }
 
 function comparePublished(a: Video, b: Video): number {

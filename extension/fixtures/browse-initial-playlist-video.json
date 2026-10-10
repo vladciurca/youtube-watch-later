@@ -1,0 +1,88 @@
+{
+  "header": {
+    "playlistHeaderRenderer": {
+      "numVideosText": { "simpleText": "1,234 videos" }
+    }
+  },
+  "contents": {
+    "twoColumnBrowseResultsRenderer": {
+      "tabs": [
+        {
+          "tabRenderer": {
+            "content": {
+              "sectionListRenderer": {
+                "contents": [
+                  {
+                    "itemSectionRenderer": {
+                      "contents": [
+                        {
+                          "playlistVideoListRenderer": {
+                            "playlistId": "WL",
+                            "contents": [
+                              {
+                                "playlistVideoRenderer": {
+                                  "videoId": "ddddddddddd",
+                                  "title": { "runs": [{ "text": "Old shape first" }] },
+                                  "shortBylineText": { "simpleText": "Old Channel" },
+                                  "lengthText": { "simpleText": "3:00" },
+                                  "lengthSeconds": "180",
+                                  "index": { "simpleText": "9" },
+                                  "publishedTimeText": { "simpleText": "Streamed 5 hours ago" },
+                                  "navigationEndpoint": {
+                                    "watchEndpoint": {
+                                      "videoId": "ddddddddddd",
+                                      "playlistId": "WL"
+                                    }
+                                  },
+                                  "thumbnailOverlays": [
+                                    {
+                                      "thumbnailOverlayResumePlaybackRenderer": {
+                                        "percentDurationWatched": 40
+                                      }
+                                    }
+                                  ]
+                                }
+                              },
+                              {
+                                "playlistVideoRenderer": {
+                                  "videoId": "eeeeeeeeeee",
+                                  "title": { "simpleText": "Old shape second" },
+                                  "shortBylineText": { "simpleText": "Old Channel" },
+                                  "lengthText": { "simpleText": "4:00" },
+                                  "index": { "simpleText": "1" },
+                                  "navigationEndpoint": {
+                                    "watchEndpoint": { "videoId": "eeeeeeeeeee", "playlistId": "WL" }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "continuationItemRenderer": {
+                      "continuationEndpoint": {
+                        "commandExecutorCommand": {
+                          "commands": [
+                            {
+                              "continuationCommand": {
+                                "token": "tok-old-sibling",
+                                "request": "CONTINUATION_REQUEST_TYPE_BROWSE"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

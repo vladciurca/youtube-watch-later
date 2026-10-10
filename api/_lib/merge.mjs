@@ -7,14 +7,18 @@ import {
   normalizeScrapedVideo,
   remainingSecFrom,
   resumeTimeFrom,
-  savedRankFromScraped,
   statusFromWatchedPct,
 } from "./progress.mjs";
 
 const PARTIAL_SYNC_MIN_PREVIOUS = 50;
 const PARTIAL_SYNC_RATIO = 0.8;
+const STATED_COMPLETE_RATIO = 0.98;
 
-export function isPartialWatchLaterScrape(existingVideos, scrapedCount) {
+export function isPartialWatchLaterScrape(existingVideos, scrapedCount, statedCount) {
+  const stated = Number(statedCount);
+  if (Number.isFinite(stated) && stated > 0) {
+    return scrapedCount < STATED_COMPLETE_RATIO * stated;
+  }
   const previousOnList = existingVideos.filter(
     (video) => video?.id && video.droppedAt == null,
   ).length;
@@ -61,7 +65,9 @@ export function mergeWatchLaterLibrary(
     const scraped = normalizeScrapedVideo(raw);
     if (!scraped || seen.has(scraped.id)) continue;
     seen.add(scraped.id);
-    const savedRank = savedRankFromScraped(scraped, seen.size - 1);
+    // Playlist order is the order the extension sent. A row index of 1 on a
+    // later page must not become savedRank 0.
+    const savedRank = seen.size - 1;
 
     const prev = previous.get(scraped.id);
     const durationSec = scraped.durationSec || prev?.durationSec || 0;
@@ -97,20 +103,41 @@ export function mergeWatchLaterLibrary(
     });
   }
 
-  const partial = isPartialWatchLaterScrape(prepared, seen.size);
+  const statedCount = Number(options.statedCount);
+  const partial = isPartialWatchLaterScrape(
+    prepared,
+    seen.size,
+    Number.isFinite(statedCount) && statedCount > 0 ? statedCount : null,
+  );
 
   let dropped = 0;
-  for (const prev of prepared) {
-    if (!prev?.id || seen.has(prev.id)) continue;
+  const missing = [];
+  prepared.forEach((prev, originalIndex) => {
+    if (!prev?.id || seen.has(prev.id)) return;
     if (partial && prev.droppedAt == null) {
-      videos.push({ ...prev });
-      continue;
+      missing.push({ prev, originalIndex });
+      return;
     }
     videos.push({
       ...prev,
       droppedAt: prev.droppedAt ?? syncedAt,
     });
     dropped += 1;
+  });
+
+  missing.sort((a, b) => {
+    const aRanked = Number.isFinite(a.prev.savedRank);
+    const bRanked = Number.isFinite(b.prev.savedRank);
+    if (aRanked !== bRanked) return aRanked ? -1 : 1;
+    if (aRanked && bRanked && a.prev.savedRank !== b.prev.savedRank) {
+      return a.prev.savedRank - b.prev.savedRank;
+    }
+    return a.originalIndex - b.originalIndex;
+  });
+  let tailRank = seen.size;
+  for (const { prev } of missing) {
+    videos.push({ ...prev, savedRank: tailRank });
+    tailRank += 1;
   }
 
   return {
@@ -129,6 +156,7 @@ export function mergeWatchLaterLibrary(
       partial,
       resetDropped,
       clearedDropped,
+      statedCount: Number.isFinite(statedCount) && statedCount > 0 ? statedCount : null,
     },
   };
 }
