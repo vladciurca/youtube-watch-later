@@ -1,5 +1,5 @@
 import { authorizeSync, handleOptions, json, readJsonBody } from "./_lib/http.mjs";
-import { mergeWatchLaterLibrary } from "./_lib/merge.mjs";
+import { mergeWatchLaterLibrary, normalizeStatedCount } from "./_lib/merge.mjs";
 import { loadExistingLibrary, saveLiveLibrary } from "./_lib/store.mjs";
 
 export default async function handler(req, res) {
@@ -35,14 +35,15 @@ export default async function handler(req, res) {
   try {
     const existing = await loadExistingLibrary(req);
     const syncedAt = new Date().toISOString();
-    const statedCount = Number(body.statedCount);
+    // Ignore a statedCount that is not a finite non-negative integer.
+    const statedCount = normalizeStatedCount(body.statedCount);
     const { library, stats } = mergeWatchLaterLibrary(
       existing.videos ?? [],
       scraped,
       syncedAt,
       {
         resetDropped,
-        ...(Number.isFinite(statedCount) && statedCount > 0 ? { statedCount } : {}),
+        ...(statedCount != null ? { statedCount } : {}),
       },
     );
     await saveLiveLibrary(library);
