@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isPartialWatchLaterScrape, mergeWatchLaterLibrary } from "../api/_lib/merge.mjs";
+import { isPartialWatchLaterScrape, mergeWatchLaterLibrary, normalizeStatedCount } from "../api/_lib/merge.mjs";
 import {
   formatRemaining,
   parsePublishedRelative,
@@ -506,6 +506,7 @@ assert.equal(manifest.version, "1.3.0");
 assert.match(backgroundJs, /previousOnListCount/);
 assert.match(backgroundJs, /statedCount/);
 assert.match(syncJs, /body\.statedCount/);
+assert.match(syncJs, /normalizeStatedCount\(body\.statedCount\)/);
 assert.match(syncJs, /body\.resetDropped === true/);
 assert.match(popupJs, /Scraped \$\{scrapedCount\}/);
 assert.match(popupJs, /\(stated\)/);
@@ -668,6 +669,78 @@ assert.equal(
 );
 assert.equal(
   isPartialWatchLaterScrape(Array.from({ length: 692 }, (_, i) => previousLibraryVideo(i)), 117, 692),
+  true,
+);
+
+// A statedCount must not be able to replace the previous-library guard: both
+// tests have to pass before a scrape counts as complete.
+const previous692 = Array.from({ length: 692 }, (_, i) => previousLibraryVideo(i));
+assert.equal(isPartialWatchLaterScrape(previous692, 12, 12), true);
+assert.equal(isPartialWatchLaterScrape(previous692, 400, 400), true);
+
+// A statedCount far below the previous on-list count is untrustworthy (a shelf
+// label, a misparsed header), so the scrape stays partial even when it covers
+// almost the whole previous library.
+assert.equal(isPartialWatchLaterScrape(previous692, 680, 12), true);
+assert.equal(isPartialWatchLaterScrape(previous692, 680, 0), true);
+
+// A genuine removal of 60 videos is still a complete scrape.
+assert.equal(isPartialWatchLaterScrape(previous692, 632, 632), false);
+// Below PARTIAL_SYNC_MIN_PREVIOUS the statedCount alone decides.
+assert.equal(
+  isPartialWatchLaterScrape(Array.from({ length: 10 }, (_, i) => previousLibraryVideo(i)), 5, 100),
+  true,
+);
+assert.equal(
+  isPartialWatchLaterScrape(Array.from({ length: 10 }, (_, i) => previousLibraryVideo(i)), 40, 40),
+  false,
+);
+assert.equal(isPartialWatchLaterScrape([], 0, 0), false);
+
+// The bogus-small-statedCount sync must not mass-drop the rest of the library.
+const { library: bogusStatedLib, stats: bogusStatedStats } = mergeWatchLaterLibrary(
+  previous692,
+  Array.from({ length: 12 }, (_, i) => scrapedLibraryVideo(i)),
+  "2026-10-14T10:00:00.000Z",
+  { statedCount: 12 },
+);
+assert.equal(bogusStatedStats.partial, true);
+assert.equal(bogusStatedStats.dropped, 0);
+assert.equal(bogusStatedLib.partial, true);
+assert.equal(
+  bogusStatedLib.videos.filter((video) => video.droppedAt != null).length,
+  0,
+);
+assert.equal(bogusStatedLib.videos.length, 692);
+
+// statedCount is untrusted input: only finite non-negative integers count.
+assert.equal(normalizeStatedCount(692), 692);
+assert.equal(normalizeStatedCount("692"), 692);
+assert.equal(normalizeStatedCount(" 692 "), 692);
+assert.equal(normalizeStatedCount(0), 0);
+assert.equal(normalizeStatedCount(692.5), null);
+assert.equal(normalizeStatedCount(-1), null);
+assert.equal(normalizeStatedCount(Number.NaN), null);
+assert.equal(normalizeStatedCount(Number.POSITIVE_INFINITY), null);
+assert.equal(normalizeStatedCount("692 videos"), null);
+assert.equal(normalizeStatedCount(""), null);
+assert.equal(normalizeStatedCount(null), null);
+assert.equal(normalizeStatedCount(undefined), null);
+assert.equal(normalizeStatedCount(true), null);
+assert.equal(normalizeStatedCount([]), null);
+assert.equal(normalizeStatedCount({}), null);
+
+// An invalid statedCount is ignored, so the previous-library guard still rules.
+assert.equal(
+  mergeWatchLaterLibrary(previous692, scrape100, "2026-10-14T10:05:00.000Z", {
+    statedCount: "100 videos",
+  }).stats.statedCount,
+  null,
+);
+assert.equal(
+  mergeWatchLaterLibrary(previous692, scrape100, "2026-10-14T10:05:00.000Z", {
+    statedCount: "100 videos",
+  }).stats.partial,
   true,
 );
 

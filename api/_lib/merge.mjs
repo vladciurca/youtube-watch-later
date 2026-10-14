@@ -13,18 +13,41 @@ import {
 const PARTIAL_SYNC_MIN_PREVIOUS = 50;
 const PARTIAL_SYNC_RATIO = 0.8;
 const STATED_COMPLETE_RATIO = 0.98;
+const STATED_SANITY_RATIO = 0.5;
+
+// statedCount is untrusted input: the extension reads it off the page and the
+// sync endpoint takes it from the request body. Accept only a finite
+// non-negative integer, otherwise there is no stated count.
+export function normalizeStatedCount(value) {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const stated = Number(value);
+  return Number.isInteger(stated) && stated >= 0 ? stated : null;
+}
 
 export function isPartialWatchLaterScrape(existingVideos, scrapedCount, statedCount) {
-  const stated = Number(statedCount);
-  if (Number.isFinite(stated) && stated > 0) {
-    return scrapedCount < STATED_COMPLETE_RATIO * stated;
-  }
   const previousOnList = existingVideos.filter(
     (video) => video?.id && video.droppedAt == null,
   ).length;
-  return (
+  const previousGuard =
     previousOnList >= PARTIAL_SYNC_MIN_PREVIOUS &&
-    scrapedCount < PARTIAL_SYNC_RATIO * previousOnList
+    scrapedCount < PARTIAL_SYNC_RATIO * previousOnList;
+
+  const stated = normalizeStatedCount(statedCount);
+  if (stated == null) return previousGuard;
+
+  // A stated count far below the previous on-list size is not YouTube's real
+  // playlist total (a shelf label, a misparsed header). Such a count must never
+  // be able to certify a scrape as complete.
+  const statedUntrustworthy =
+    previousOnList >= PARTIAL_SYNC_MIN_PREVIOUS &&
+    stated < STATED_SANITY_RATIO * previousOnList;
+
+  // Both tests must pass for a scrape to count as complete.
+  return (
+    previousGuard ||
+    statedUntrustworthy ||
+    scrapedCount < STATED_COMPLETE_RATIO * stated
   );
 }
 
@@ -103,12 +126,8 @@ export function mergeWatchLaterLibrary(
     });
   }
 
-  const statedCount = Number(options.statedCount);
-  const partial = isPartialWatchLaterScrape(
-    prepared,
-    seen.size,
-    Number.isFinite(statedCount) && statedCount > 0 ? statedCount : null,
-  );
+  const statedCount = normalizeStatedCount(options.statedCount);
+  const partial = isPartialWatchLaterScrape(prepared, seen.size, statedCount);
 
   let dropped = 0;
   const missing = [];
@@ -156,7 +175,7 @@ export function mergeWatchLaterLibrary(
       partial,
       resetDropped,
       clearedDropped,
-      statedCount: Number.isFinite(statedCount) && statedCount > 0 ? statedCount : null,
+      statedCount,
     },
   };
 }
