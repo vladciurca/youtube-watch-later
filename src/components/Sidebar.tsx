@@ -177,6 +177,8 @@ export function Sidebar({
 
 function toneForStatus(status: WatchStatus): string {
   switch (status) {
+    case "Done":
+      return "done";
     case "Almost finished":
       return "almost";
     case "Partially watched":

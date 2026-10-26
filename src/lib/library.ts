@@ -6,6 +6,10 @@ import type {
   WatchStatus,
 } from "../types";
 import { VIDEO_CATEGORIES, WATCH_STATUSES } from "../types";
+import { statusFromWatchedPct } from "../../api/_lib/progress.mjs";
+import { DONE_THRESHOLD_PCT, isDoneVideo } from "../../api/_lib/threshold.mjs";
+
+export { DONE_THRESHOLD_PCT };
 
 export const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "saved", label: "Saved" },
@@ -104,6 +108,7 @@ export function statusCounts(
   filters: Pick<LibraryFilters, "categories" | "query">,
 ): Record<WatchStatus | "Dropped", number> {
   const counts: Record<WatchStatus | "Dropped", number> = {
+    Done: 0,
     "Almost finished": 0,
     "Partially watched": 0,
     "Barely started": 0,
@@ -140,8 +145,22 @@ export function categoryCounts(
   return counts;
 }
 
-function isDone(video: Video): boolean {
-  return video.remainingSec <= 0;
+/** Done = watched at least DONE_THRESHOLD_PCT (shared with the API). */
+export function isDone(video: Pick<Video, "watchedPct">): boolean {
+  return isDoneVideo(video);
+}
+
+/**
+ * Status always follows the current watch percent, so older stored statuses
+ * (written before Done existed) do not show up as "Almost finished".
+ */
+export function withDerivedStatus(videos: Video[]): Video[] {
+  return videos.map((video) => {
+    if (video.markedDone) return video.status === "Done" ? video : { ...video, status: "Done" };
+    if (typeof video.watchedPct !== "number" || !Number.isFinite(video.watchedPct)) return video;
+    const status = statusFromWatchedPct(video.watchedPct) as Video["status"];
+    return status === video.status ? video : { ...video, status };
+  });
 }
 
 function hasSavedRank(video: Video): boolean {

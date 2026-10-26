@@ -54,14 +54,17 @@ If a video already has `techBusiness: true` from the sheet or previous library, 
 
 Each row shows the YouTube published date (`publishedTimeText` / "4 weeks ago"), parsed to ISO at scrape time. **Published** sorts newest first; videos without a date sort last. Later scrapes that omit a date keep the previous `publishedAt`.
 
-Status is recomputed from watched percent:
+Status is recomputed from watched percent (`statusFromWatchedPct` in `api/_lib/progress.mjs`; the browser re-derives it on load so older stored statuses follow the same rules):
 
 | Watched % | Status |
 | --- | --- |
-| 90+ | Almost finished |
+| 95+ | Done |
+| 90–94 | Almost finished |
 | 40–89 | Partially watched |
 | 10–39 | Barely started |
 | 0–9 | Not started |
+
+**Done** is one shared threshold, `DONE_THRESHOLD_PCT = 95` in `api/_lib/threshold.mjs`, used by the UI (`isDone`), the Queue auto-removal (`isDoneVideo`), the "Done" label and the locked check. It depends only on watch progress, not on whether the video is still in the playlist. A missing or null `watchedPct` is never Done, and an unknown duration (0s) no longer makes a video Done. Marking done by hand (`done.json`) still works below 95% and survives syncs.
 
 `remainingSec = durationSec * (1 - watchedPct / 100)`. Resume `t` comes from playlist progress.
 
@@ -99,6 +102,17 @@ npm run preview
 - Sort: **Saved** — YouTube Watch Later order (`savedRank` 0 is the top of the list). Until the first sync, the seed has no rank and **Saved** keeps the seed's order. **Remaining** sorts least leftover time among unfinished videos first, Done / 100% last. Leftover under an hour shows `M:SS` (e.g. `6:00 left`); hours stay `1h 4m left`. **Published** sorts newest upload first, missing dates last. **Watched %** still sorts highest `watchedPct` first
 
 Click a row to open `https://www.youtube.com/watch?v={id}&t={t}s` in a new tab. That click does not change `watchedPct` or `status`.
+
+## Queue
+
+A star on every row adds or removes a video from the **Queue**. The **Queue** tab (with a count) shows only queued videos in queue order; the app still opens on **All** with no filters. Reorder by dragging the handle (works by touch), or use the move-to-top / up / down buttons. Filters and sort do not apply inside the Queue.
+
+- Stored server-side in its own private Blob, `watch-later/queue.json`, via `/api/queue` (GET list, POST `{ op }` with `add | remove | top | up | down | reorder`). Phone and laptop read the same list; each re-reads it when the tab is focused or Refresh is pressed. **No database migration is needed.**
+- The extension sync rewrites only `watch-later/library.json`. It never writes queue data, and a video that becomes Dropped stays queued. After a sync the only change is that videos now **Done** (nothing left to watch) leave the Queue; the Queue API does the same when it is read. Tapping the star again also removes a video.
+- **Mark done:** each row (and each Queue row) has a check button. It stores an explicit Done in its own private Blob, `watch-later/done.json`, via `/api/done` (POST `{ op: { type: "done" | "undone", id } }`), which a sync never writes, so it survives syncs even if YouTube progress is lower. Marking done also removes the video from the Queue; the check button on a marked row is "Mark not done" (undo). Videos already at 100% on YouTube show a locked check.
+- Reordering on touch uses native non-passive touch listeners on the drag handle only (iOS Safari needs this to stop the page scrolling); mouse uses pointer events. Move-to-top / up / down buttons are 44px on phones.
+- The Queue never touches YouTube's real Watch Later playlist.
+- If the Queue API cannot be reached (e.g. no `BLOB_READ_WRITE_TOKEN`), stars are disabled and the tab says the Queue is unavailable; the rest of the library works as before.
 
 ## Out of scope
 

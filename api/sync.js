@@ -1,6 +1,6 @@
 import { authorizeSync, handleOptions, json, readJsonBody } from "./_lib/http.mjs";
 import { mergeWatchLaterLibrary, normalizeStatedCount } from "./_lib/merge.mjs";
-import { loadExistingLibrary, saveLiveLibrary } from "./_lib/store.mjs";
+import { loadExistingLibrary, pruneQueueForLibrary, saveLiveLibrary } from "./_lib/store.mjs";
 
 export default async function handler(req, res) {
   if (handleOptions(req, res)) return;
@@ -47,6 +47,9 @@ export default async function handler(req, res) {
       },
     );
     await saveLiveLibrary(library);
+    // Queue lives in its own blob and is never rewritten by a sync; the only
+    // change is that videos that are now Done leave it.
+    await pruneQueueForLibrary(library.videos);
     json(res, 200, { ok: true, ...stats, syncedAt });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Sync failed";

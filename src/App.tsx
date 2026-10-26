@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Header } from "./components/Header";
+import type { LibraryView } from "./components/Header";
+import { QueueList } from "./components/QueueList";
 import { Sidebar } from "./components/Sidebar";
 import { VideoList } from "./components/VideoList";
 import {
@@ -7,8 +9,21 @@ import {
   activeFilterCount,
   categoryCounts,
   filterAndSortVideos,
+  withDerivedStatus,
   statusCounts,
 } from "./lib/library";
+import {
+  applyQueueOp,
+  emptyQueue,
+  fetchQueue,
+  queueIds,
+  queuedVideos,
+  reorderIds,
+  sendQueueOp,
+} from "./lib/queue";
+import type { Queue, QueueOp } from "./lib/queue";
+import { applyDoneOp, applyDoneOverrides, emptyDone, fetchDone, sendDoneOp } from "./lib/done";
+import type { DoneList, DoneOp } from "./lib/done";
 import type {
   LibraryFilters,
   SortKey,
@@ -19,7 +34,7 @@ import type {
 } from "./types";
 
 export default function App() {
-  const [videos, setVideos] = useState<Video[]>([]);
+  const [rawVideos, setVideos] = useState<Video[]>([]);
   const [source, setSource] = useState<string | null>(null);
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
   const [live, setLive] = useState(false);
@@ -28,6 +43,180 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<LibraryFilters>(DEFAULT_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [doneList, setDoneList] = useState<DoneList>(emptyDone);
+  const [doneAvailable, setDoneAvailable] = useState(true);
+  const doneRef = useRef<DoneList>(doneList);
+  const donePending = useRef(0);
+  const doneEpoch = useRef(0);
+  const doneChain = useRef<Promise<unknown>>(Promise.resolve());
+  const [view, setView] = useState<LibraryView>("all");
+  const [queue, setQueue] = useState<Queue>(emptyQueue);
+  const [queueReady, setQueueReady] = useState(false);
+  const [queueAvailable, setQueueAvailable] = useState(true);
+  const [queueNotice, setQueueNotice] = useState<string | null>(null);
+  const queueRef = useRef<Queue>(queue);
+  const queuePending = useRef(0);
+  // Bumped on every local change so an older in-flight read cannot overwrite it.
+  const queueEpoch = useRef(0);
+  const queueChain = useRef<Promise<unknown>>(Promise.resolve());
+
+  const commitQueue = useCallback((next: Queue) => {
+    queueRef.current = next;
+    setQueue(next);
+  }, []);
+
+  const loadQueue = useCallback(async () => {
+    if (queuePending.current > 0) return;
+    const epoch = queueEpoch.current;
+    try {
+      const next = await fetchQueue();
+      if (queuePending.current > 0 || epoch !== queueEpoch.current) return;
+      commitQueue(next);
+      setQueueAvailable(true);
+    } catch {
+      setQueueAvailable(false);
+    } finally {
+      setQueueReady(true);
+    }
+  }, [commitQueue]);
+
+  const mutateQueue = useCallback(
+    (op: QueueOp) => {
+      queueEpoch.current += 1;
+      commitQueue(applyQueueOp(queueRef.current, op));
+      setQueueNotice(null);
+      queuePending.current += 1;
+      queueChain.current = queueChain.current.then(async () => {
+        try {
+          const saved = await sendQueueOp(op);
+          queuePending.current -= 1;
+          if (queuePending.current === 0) {
+            queueEpoch.current += 1;
+            commitQueue(saved);
+          }
+        } catch (err) {
+          queuePending.current -= 1;
+          setQueueNotice(
+            err instanceof Error ? err.message : "Could not update the Queue",
+          );
+          if (queuePending.current === 0) await loadQueue();
+        }
+      });
+    },
+    [commitQueue, loadQueue],
+  );
+
+  const videos = useMemo(
+    () => withDerivedStatus(applyDoneOverrides(rawVideos, doneList)),
+    [rawVideos, doneList],
+  );
+
+  const commitDone = useCallback((next: DoneList) => {
+    doneRef.current = next;
+    setDoneList(next);
+  }, []);
+
+  const loadDoneList = useCallback(async () => {
+    if (donePending.current > 0) return;
+    const epoch = doneEpoch.current;
+    try {
+      const next = await fetchDone();
+      if (donePending.current > 0 || epoch !== doneEpoch.current) return;
+      commitDone(next);
+      setDoneAvailable(true);
+    } catch {
+      setDoneAvailable(false);
+    }
+  }, [commitDone]);
+
+  const mutateDone = useCallback(
+    (op: DoneOp) => {
+      doneEpoch.current += 1;
+      commitDone(applyDoneOp(doneRef.current, op));
+      setQueueNotice(null);
+      donePending.current += 1;
+      doneChain.current = doneChain.current.then(async () => {
+        try {
+          const saved = await sendDoneOp(op);
+          donePending.current -= 1;
+          if (donePending.current === 0) {
+            doneEpoch.current += 1;
+            commitDone(saved);
+          }
+        } catch (err) {
+          donePending.current -= 1;
+          setQueueNotice(err instanceof Error ? err.message : "Could not save Done");
+          if (donePending.current === 0) await loadDoneList();
+        }
+      });
+    },
+    [commitDone, loadDoneList],
+  );
+
+  const toggleDone = useCallback(
+    (video: Video) => {
+      const manual = doneRef.current.items.some((item) => item.id === video.id);
+      mutateDone({ type: manual ? "undone" : "done", id: video.id });
+    },
+    [mutateDone],
+  );
+
+  useEffect(() => {
+    const first = setTimeout(() => {
+      void loadQueue();
+      void loadDoneList();
+    }, 0);
+    // The same Queue on phone and laptop: re-read it whenever this tab is shown again.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void loadQueue();
+        void loadDoneList();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      clearTimeout(first);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [loadQueue, loadDoneList]);
+
+  const ids = useMemo(() => queueIds(queue), [queue]);
+  const idSet = useMemo(() => new Set(ids), [ids]);
+  const queued = useMemo(() => queuedVideos(videos, ids), [videos, ids]);
+  // A queued video that is now Done leaves the Queue (the server prunes it too).
+  const queuedDone = useMemo(
+    () => (videos.length === 0 ? [] : ids.filter((id) => !queued.some((v) => v.id === id) && videos.some((v) => v.id === id))),
+    [videos, ids, queued],
+  );
+  useEffect(() => {
+    if (!queueReady) return;
+    for (const id of queuedDone) mutateQueue({ type: "remove", id });
+  }, [queueReady, queuedDone, mutateQueue]);
+
+  const toggleQueue = useCallback(
+    (video: Video) => {
+      mutateQueue({ type: queueRef.current.items.some((i) => i.id === video.id) ? "remove" : "add", id: video.id });
+    },
+    [mutateQueue],
+  );
+
+  const moveInQueue = useCallback(
+    (id: string, type: "top" | "up" | "down") => mutateQueue({ type, id }),
+    [mutateQueue],
+  );
+
+  const reorderQueue = useCallback(
+    (id: string, insertIndex: number) => {
+      // Reorder against the visible order so hidden ids keep their relative place.
+      const shown = queuedVideos(videos, queueIds(queueRef.current)).map((v) => v.id);
+      const next = reorderIds(shown, id, insertIndex);
+      const hidden = queueIds(queueRef.current).filter((x) => !shown.includes(x));
+      mutateQueue({ type: "reorder", ids: [...next, ...hidden] });
+    },
+    [videos, mutateQueue],
+  );
 
   const loadLibrary = useCallback(async () => {
     const apply = (data: VideoLibrary, fromLive: boolean) => {
@@ -119,6 +308,8 @@ export default function App() {
 
   const refreshLibrary = useCallback(async () => {
     setLoading(true);
+    void loadQueue();
+    void loadDoneList();
     try {
       await loadLibrary();
     } catch (err) {
@@ -126,10 +317,12 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [loadLibrary]);
+  }, [loadLibrary, loadQueue, loadDoneList]);
 
   return (
-    <div className={`app${filtersOpen ? " filters-open" : ""}`}>
+    <div
+      className={`app${filtersOpen ? " filters-open" : ""}${view === "queue" ? " queue-view" : ""}`}
+    >
       <Sidebar
         filters={filters}
         counts={counts}
@@ -148,7 +341,7 @@ export default function App() {
       />
       <div className="main">
         <Header
-          matchCount={loading ? null : visible.length}
+          matchCount={loading ? null : view === "queue" ? queued.length : visible.length}
           totalCount={videos.length}
           source={source}
           syncedAt={syncedAt}
@@ -161,13 +354,39 @@ export default function App() {
           onQueryChange={(query) => setFilters((prev) => ({ ...prev, query }))}
           onSortChange={(sort: SortKey) => setFilters((prev) => ({ ...prev, sort }))}
           onRefresh={() => void refreshLibrary()}
+          view={view}
+          queueCount={queueReady && !loading ? queued.length : null}
+          onViewChange={(next) => {
+            setView(next);
+            setFiltersOpen(false);
+          }}
         />
-        <VideoList
-          videos={visible}
-          loading={loading}
-          error={error}
-          onReset={resetFilters}
-        />
+        {queueNotice ? (
+          <p className="queue-notice" role="alert">
+            {queueNotice}
+          </p>
+        ) : null}
+        {view === "queue" ? (
+          <QueueList
+            videos={queued}
+            loading={loading || !queueReady}
+            error={error}
+            available={queueAvailable}
+            onToggle={toggleQueue}
+            done={{ available: doneAvailable, onToggle: toggleDone }}
+            onMove={moveInQueue}
+            onReorder={reorderQueue}
+          />
+        ) : (
+          <VideoList
+            videos={visible}
+            loading={loading}
+            error={error}
+            onReset={resetFilters}
+            done={{ available: doneAvailable, onToggle: toggleDone }}
+            queue={{ available: queueAvailable, ids: idSet, onToggle: toggleQueue }}
+          />
+        )}
       </div>
       {filtersOpen ? (
         <button

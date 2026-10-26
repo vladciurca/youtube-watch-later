@@ -1,4 +1,7 @@
+import { isDonePct } from "./threshold.mjs";
+
 export const WATCH_STATUSES = [
+  "Done",
   "Almost finished",
   "Partially watched",
   "Barely started",
@@ -19,6 +22,7 @@ export function clampWatchedPct(value) {
 
 export function statusFromWatchedPct(watchedPct) {
   const pct = clampWatchedPct(watchedPct);
+  if (isDonePct(pct)) return "Done";
   if (pct >= 90) return "Almost finished";
   if (pct >= 40) return "Partially watched";
   if (pct >= 10) return "Barely started";
