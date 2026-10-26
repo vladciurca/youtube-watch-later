@@ -13,9 +13,16 @@ export interface QueueControls {
   onToggle: (video: Video) => void;
 }
 
+export interface DoneControls {
+  /** False when the Done backend could not be reached. */
+  available: boolean;
+  onToggle: (video: Video) => void;
+}
+
 interface VideoRowProps {
   video: Video;
   queue?: QueueControls;
+  done?: DoneControls;
 }
 
 const STATUS_CLASS: Record<WatchStatus, string> = {
@@ -63,7 +70,50 @@ export function StarButton({
   );
 }
 
-export function VideoRow({ video, queue }: VideoRowProps) {
+export function DoneButton({ video, done }: { video: Video; done: DoneControls }) {
+  const finished = video.remainingSec <= 0;
+  const manual = video.markedDone === true;
+  // Finished on YouTube (100%) can't be undone here; only an explicit Done can.
+  const locked = finished && !manual;
+  const label = manual ? "Mark not done" : "Mark done";
+  const title = !done.available
+    ? "Saving is unavailable right now"
+    : locked
+      ? "Finished on YouTube"
+      : label;
+  return (
+    <button
+      type="button"
+      className={`done-btn${finished ? " is-on" : ""}`}
+      aria-pressed={finished}
+      aria-label={locked ? "Finished on YouTube" : label}
+      title={title}
+      disabled={!done.available || locked}
+      onClick={() => done.onToggle(video)}
+    >
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <circle
+          cx="12"
+          cy="12"
+          r="9"
+          fill={finished ? "currentColor" : "none"}
+          stroke="currentColor"
+          strokeWidth="1.8"
+        />
+        <path
+          d="M7.8 12.4l3 3 5.4-6"
+          fill="none"
+          stroke={finished ? "#0b0b0d" : "currentColor"}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </button>
+  );
+}
+
+export function VideoRow({ video, queue, done }: VideoRowProps) {
   const pct = Math.min(100, Math.max(0, video.watchedPct));
   const published = publishedDisplay(video);
 
@@ -103,6 +153,9 @@ export function VideoRow({ video, queue }: VideoRowProps) {
           <span className={`status-pill ${STATUS_CLASS[video.status]}`}>
             {video.status}
           </span>
+          {video.markedDone ? (
+            <span className="status-pill marked-done">Marked done</span>
+          ) : null}
           {video.droppedAt ? (
             <span
               className="status-pill dropped"
@@ -129,12 +182,13 @@ export function VideoRow({ video, queue }: VideoRowProps) {
     </a>
   );
 
-  if (!queue) return row;
+  if (!queue && !done) return row;
   return (
     <div className="video-item">
       {row}
       <div className="row-actions">
-        <StarButton video={video} queue={queue} />
+        {done ? <DoneButton video={video} done={done} /> : null}
+        {queue ? <StarButton video={video} queue={queue} /> : null}
       </div>
     </div>
   );

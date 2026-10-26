@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { Video } from "../types";
-import { StarButton, VideoRow } from "./VideoRow";
-import type { QueueControls } from "./VideoRow";
+import { DoneButton, StarButton, VideoRow } from "./VideoRow";
+import type { DoneControls, QueueControls } from "./VideoRow";
 
 interface QueueListProps {
   videos: Video[];
@@ -10,6 +10,7 @@ interface QueueListProps {
   error: string | null;
   available: boolean;
   onToggle: (video: Video) => void;
+  done: DoneControls;
   onMove: (id: string, type: "top" | "up" | "down") => void;
   onReorder: (id: string, insertIndex: number) => void;
 }
@@ -24,12 +25,126 @@ interface DragState {
 
 const EDGE = 70;
 
+interface DragHandleProps {
+  label: string;
+  onStart: (clientY: number) => void;
+  onMove: (clientY: number) => void;
+  onEnd: (commit: boolean) => void;
+  onNudge: (type: "up" | "down") => void;
+}
+
+/**
+ * Touch uses native, non-passive touch listeners on the handle itself: iOS
+ * Safari only lets a page stop scrolling from touchstart/touchmove with
+ * preventDefault (React's synthetic touch handlers are passive), and touch
+ * events keep going to the element they started on. Mouse and pen use pointer
+ * events with capture. Only the handle blocks scrolling (touch-action: none).
+ */
+function DragHandle({ label, onStart, onMove, onEnd, onNudge }: DragHandleProps) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const handlers = useRef({ onStart, onMove, onEnd });
+  useEffect(() => {
+    handlers.current = { onStart, onMove, onEnd };
+  });
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let active: number | null = null;
+    const find = (event: TouchEvent) =>
+      Array.from(event.changedTouches).find((touch) => touch.identifier === active);
+
+    const start = (event: TouchEvent) => {
+      if (active !== null) return;
+      const touch = event.changedTouches[0];
+      if (!touch) return;
+      active = touch.identifier;
+      event.preventDefault();
+      handlers.current.onStart(touch.clientY);
+    };
+    const move = (event: TouchEvent) => {
+      const touch = find(event);
+      if (!touch) return;
+      event.preventDefault();
+      handlers.current.onMove(touch.clientY);
+    };
+    const end = (event: TouchEvent) => {
+      if (!find(event)) return;
+      event.preventDefault();
+      active = null;
+      handlers.current.onEnd(event.type === "touchend");
+    };
+
+    el.addEventListener("touchstart", start, { passive: false });
+    el.addEventListener("touchmove", move, { passive: false });
+    el.addEventListener("touchend", end, { passive: false });
+    el.addEventListener("touchcancel", end, { passive: false });
+    return () => {
+      el.removeEventListener("touchstart", start);
+      el.removeEventListener("touchmove", move);
+      el.removeEventListener("touchend", end);
+      el.removeEventListener("touchcancel", end);
+    };
+  }, []);
+
+  const mouse = (event: ReactPointerEvent<HTMLElement>) => event.pointerType !== "touch";
+
+  return (
+    <button
+      ref={ref}
+      type="button"
+      className="drag-handle"
+      aria-label={`Drag to reorder: ${label}`}
+      title="Drag to reorder"
+      onPointerDown={(event) => {
+        if (!mouse(event) || event.button !== 0) return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        handlers.current.onStart(event.clientY);
+      }}
+      onPointerMove={(event) => {
+        if (mouse(event) && event.currentTarget.hasPointerCapture(event.pointerId)) {
+          handlers.current.onMove(event.clientY);
+        }
+      }}
+      onPointerUp={(event) => {
+        if (!mouse(event) || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
+        event.currentTarget.releasePointerCapture(event.pointerId);
+        handlers.current.onEnd(true);
+      }}
+      onPointerCancel={(event) => {
+        if (mouse(event)) handlers.current.onEnd(false);
+      }}
+      onContextMenu={(event) => event.preventDefault()}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          onNudge("up");
+        } else if (event.key === "ArrowDown") {
+          event.preventDefault();
+          onNudge("down");
+        }
+      }}
+    >
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <path
+          d="M8 6h.01M16 6h.01M8 12h.01M16 12h.01M8 18h.01M16 18h.01"
+          stroke="currentColor"
+          strokeWidth="3"
+          strokeLinecap="round"
+        />
+      </svg>
+    </button>
+  );
+}
+
 export function QueueList({
   videos,
   loading,
   error,
   available,
   onToggle,
+  done,
   onMove,
   onReorder,
 }: QueueListProps) {
@@ -77,40 +192,32 @@ export function QueueList({
     s.raf = requestAnimationFrame(loop);
   }, [measure]);
 
-  const onHandleDown = (event: ReactPointerEvent<HTMLElement>, id: string) => {
-    if (event.pointerType === "mouse" && event.button !== 0) return;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
+  const startDrag = (id: string, y: number) => {
+    stop();
     session.current = {
       id,
-      startY: event.clientY,
+      startY: y,
       startScroll: window.scrollY,
-      lastY: event.clientY,
+      lastY: y,
       raf: 0,
     };
     setDrag(measure());
     session.current.raf = requestAnimationFrame(tick);
   };
 
-  const onHandleMove = (event: ReactPointerEvent<HTMLElement>) => {
+  const updateDrag = (y: number) => {
     if (!session.current) return;
-    session.current.lastY = event.clientY;
+    session.current.lastY = y;
     setDrag(measure());
   };
 
-  const onHandleUp = (event: ReactPointerEvent<HTMLElement>, commit: boolean) => {
-    const s = session.current;
-    if (!s) return;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
+  const finishDrag = (commit: boolean) => {
+    if (!session.current) return;
     const final = commit ? measure() : null;
     stop();
     if (final) {
       const original = videos.findIndex((video) => video.id === final.id);
-      if (final.insertIndex !== original) {
-        onReorder(final.id, final.insertIndex);
-      }
+      if (final.insertIndex !== original) onReorder(final.id, final.insertIndex);
     }
   };
 
@@ -182,34 +289,13 @@ export function QueueList({
             className={`video-item queue-item${dragging ? " is-drag" : ""}${drop}`}
             style={dragging ? { transform: `translateY(${drag.offset}px)` } : undefined}
           >
-            <button
-              type="button"
-              className="drag-handle"
-              aria-label={`Drag to reorder: ${video.title}`}
-              title="Drag to reorder"
-              onPointerDown={(event) => onHandleDown(event, video.id)}
-              onPointerMove={onHandleMove}
-              onPointerUp={(event) => onHandleUp(event, true)}
-              onPointerCancel={(event) => onHandleUp(event, false)}
-              onKeyDown={(event) => {
-                if (event.key === "ArrowUp") {
-                  event.preventDefault();
-                  onMove(video.id, "up");
-                } else if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  onMove(video.id, "down");
-                }
-              }}
-            >
-              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                <path
-                  d="M8 6h.01M16 6h.01M8 12h.01M16 12h.01M8 18h.01M16 18h.01"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
+            <DragHandle
+              label={video.title}
+              onStart={(y) => startDrag(video.id, y)}
+              onMove={updateDrag}
+              onEnd={finishDrag}
+              onNudge={(type) => onMove(video.id, type)}
+            />
             <VideoRow video={video} />
             <div className="row-actions queue-actions">
               <button
@@ -242,6 +328,7 @@ export function QueueList({
               >
                 ▼
               </button>
+              <DoneButton video={video} done={done} />
               <StarButton video={video} queue={controls} />
             </div>
           </div>

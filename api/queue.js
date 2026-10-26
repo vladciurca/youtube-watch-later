@@ -1,3 +1,4 @@
+import { applyDoneOverrides } from "./_lib/done.mjs";
 import { handleOptions, json, readJsonBody } from "./_lib/http.mjs";
 import {
   applyQueueOp,
@@ -8,6 +9,7 @@ import {
 } from "./_lib/queue.mjs";
 import {
   loadExistingLibrary,
+  loadDone,
   loadLiveLibrary,
   loadQueue,
   saveQueue,
@@ -42,7 +44,13 @@ export default async function handler(req, res) {
         // Done videos leave the queue automatically.
         try {
           const live = await loadLiveLibrary();
-          const pruned = pruneDoneFromQueue(queue, live?.videos ?? []);
+          let done = null;
+          try {
+            done = await loadDone();
+          } catch {
+            // progress-based Done only
+          }
+          const pruned = pruneDoneFromQueue(queue, applyDoneOverrides(live?.videos ?? [], done));
           if (pruned.removed.length > 0) {
             queue = pruned.queue;
             await saveQueue(queue);
@@ -91,7 +99,15 @@ export default async function handler(req, res) {
     if (op.type === "add") {
       // Only real, unfinished videos from the library can be queued.
       const library = await loadExistingLibrary(req);
-      const video = (library.videos ?? []).find((item) => item?.id === op.id);
+      let done = null;
+      try {
+        done = await loadDone();
+      } catch {
+        // progress-based Done only
+      }
+      const video = applyDoneOverrides(library.videos ?? [], done).find(
+        (item) => item?.id === op.id,
+      );
       if (!video) {
         json(res, 404, { error: "Video is not in the library" });
         return;

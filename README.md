@@ -106,6 +106,8 @@ A star on every row adds or removes a video from the **Queue**. The **Queue** ta
 
 - Stored server-side in its own private Blob, `watch-later/queue.json`, via `/api/queue` (GET list, POST `{ op }` with `add | remove | top | up | down | reorder`). Phone and laptop read the same list; each re-reads it when the tab is focused or Refresh is pressed. **No database migration is needed.**
 - The extension sync rewrites only `watch-later/library.json`. It never writes queue data, and a video that becomes Dropped stays queued. After a sync the only change is that videos now **Done** (nothing left to watch) leave the Queue; the Queue API does the same when it is read. Tapping the star again also removes a video.
+- **Mark done:** each row (and each Queue row) has a check button. It stores an explicit Done in its own private Blob, `watch-later/done.json`, via `/api/done` (POST `{ op: { type: "done" | "undone", id } }`), which a sync never writes, so it survives syncs even if YouTube progress is lower. Marking done also removes the video from the Queue; the check button on a marked row is "Mark not done" (undo). Videos already at 100% on YouTube show a locked check.
+- Reordering on touch uses native non-passive touch listeners on the drag handle only (iOS Safari needs this to stop the page scrolling); mouse uses pointer events. Move-to-top / up / down buttons are 44px on phones.
 - The Queue never touches YouTube's real Watch Later playlist.
 - If the Queue API cannot be reached (e.g. no `BLOB_READ_WRITE_TOKEN`), stars are disabled and the tab says the Queue is unavailable; the rest of the library works as before.
 

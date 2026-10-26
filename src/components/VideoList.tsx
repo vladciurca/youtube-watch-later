@@ -1,12 +1,13 @@
 import type { Video } from "../types";
 import { VideoRow } from "./VideoRow";
-import type { QueueControls } from "./VideoRow";
+import type { DoneControls, QueueControls } from "./VideoRow";
 
 interface VideoListProps {
   videos: Video[];
   loading: boolean;
   error: string | null;
   onReset: () => void;
+  done?: DoneControls;
   queue?: {
     available: boolean;
     ids: Set<string>;
@@ -14,7 +15,7 @@ interface VideoListProps {
   };
 }
 
-export function VideoList({ videos, loading, error, onReset, queue }: VideoListProps) {
+export function VideoList({ videos, loading, error, onReset, queue, done }: VideoListProps) {
   if (loading) {
     return (
       <div className="list" aria-busy="true">
@@ -51,6 +52,7 @@ export function VideoList({ videos, loading, error, onReset, queue }: VideoListP
         <VideoRow
           key={video.id}
           video={video}
+          done={done}
           queue={
             queue
               ? {

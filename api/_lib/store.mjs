@@ -1,10 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { applyDoneOverrides, normalizeDone } from "./done.mjs";
 import { normalizeQueue, pruneDoneFromQueue } from "./queue.mjs";
 
 const BLOB_PATH = "watch-later/library.json";
 const BLOB_PREFIX = "watch-later/";
 const QUEUE_PATH = "watch-later/queue.json";
+const DONE_PATH = "watch-later/done.json";
 
 // Private Blob stores reject access:"public" puts, and blob URLs are not
 // anonymously fetchable. Authenticate list/put/get with BLOB_READ_WRITE_TOKEN.
@@ -175,11 +177,40 @@ export async function saveQueue(queue, sdkOverride) {
   });
 }
 
-// Remove Done videos from the queue; best effort, never throws.
+// Explicit "Mark done" overrides live in their own blob too; a sync never writes it.
+export async function loadDone(sdkOverride) {
+  const token = blobToken();
+  if (!token) throw new Error("BLOB_READ_WRITE_TOKEN is not configured");
+  const sdk = await blobSdk(sdkOverride);
+  return normalizeDone(await readPrivateJson(sdk, DONE_PATH, token));
+}
+
+export async function saveDone(done, sdkOverride) {
+  const token = blobToken();
+  if (!token) throw new Error("BLOB_READ_WRITE_TOKEN is not configured");
+  const sdk = await blobSdk(sdkOverride);
+  return sdk.put(DONE_PATH, JSON.stringify(normalizeDone(done)), {
+    access: "private",
+    token,
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    contentType: "application/json",
+    cacheControlMaxAge: 0,
+  });
+}
+
+// Remove Done videos (progress 100% or explicitly marked) from the queue;
+// best effort, never throws.
 export async function pruneQueueForLibrary(videos, sdkOverride) {
   try {
     const current = await loadQueue(sdkOverride);
-    const { queue, removed } = pruneDoneFromQueue(current, videos);
+    let effective = videos;
+    try {
+      effective = applyDoneOverrides(videos, await loadDone(sdkOverride));
+    } catch {
+      // No overrides readable: fall back to progress-based Done only.
+    }
+    const { queue, removed } = pruneDoneFromQueue(current, effective);
     if (removed.length > 0) await saveQueue(queue, sdkOverride);
     return { queue, removed };
   } catch {

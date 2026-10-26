@@ -48,6 +48,8 @@ export interface Video {
   url: string;
   remainingSec: number;
   droppedAt: string | null;
+  /** Set client-side when the video is explicitly marked Done (server override). */
+  markedDone?: boolean;
   /** 0 = top of YouTube Watch Later. Absent only on the unsynced seed. */
   savedRank?: number | null;
   /** ISO timestamp parsed from YouTube's relative published string at scrape time. */

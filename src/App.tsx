@@ -21,6 +21,8 @@ import {
   sendQueueOp,
 } from "./lib/queue";
 import type { Queue, QueueOp } from "./lib/queue";
+import { applyDoneOp, applyDoneOverrides, emptyDone, fetchDone, sendDoneOp } from "./lib/done";
+import type { DoneList, DoneOp } from "./lib/done";
 import type {
   LibraryFilters,
   SortKey,
@@ -31,7 +33,7 @@ import type {
 } from "./types";
 
 export default function App() {
-  const [videos, setVideos] = useState<Video[]>([]);
+  const [rawVideos, setVideos] = useState<Video[]>([]);
   const [source, setSource] = useState<string | null>(null);
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
   const [live, setLive] = useState(false);
@@ -40,6 +42,12 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<LibraryFilters>(DEFAULT_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [doneList, setDoneList] = useState<DoneList>(emptyDone);
+  const [doneAvailable, setDoneAvailable] = useState(true);
+  const doneRef = useRef<DoneList>(doneList);
+  const donePending = useRef(0);
+  const doneEpoch = useRef(0);
+  const doneChain = useRef<Promise<unknown>>(Promise.resolve());
   const [view, setView] = useState<LibraryView>("all");
   const [queue, setQueue] = useState<Queue>(emptyQueue);
   const [queueReady, setQueueReady] = useState(false);
@@ -97,11 +105,72 @@ export default function App() {
     [commitQueue, loadQueue],
   );
 
+  const videos = useMemo(
+    () => applyDoneOverrides(rawVideos, doneList),
+    [rawVideos, doneList],
+  );
+
+  const commitDone = useCallback((next: DoneList) => {
+    doneRef.current = next;
+    setDoneList(next);
+  }, []);
+
+  const loadDoneList = useCallback(async () => {
+    if (donePending.current > 0) return;
+    const epoch = doneEpoch.current;
+    try {
+      const next = await fetchDone();
+      if (donePending.current > 0 || epoch !== doneEpoch.current) return;
+      commitDone(next);
+      setDoneAvailable(true);
+    } catch {
+      setDoneAvailable(false);
+    }
+  }, [commitDone]);
+
+  const mutateDone = useCallback(
+    (op: DoneOp) => {
+      doneEpoch.current += 1;
+      commitDone(applyDoneOp(doneRef.current, op));
+      setQueueNotice(null);
+      donePending.current += 1;
+      doneChain.current = doneChain.current.then(async () => {
+        try {
+          const saved = await sendDoneOp(op);
+          donePending.current -= 1;
+          if (donePending.current === 0) {
+            doneEpoch.current += 1;
+            commitDone(saved);
+          }
+        } catch (err) {
+          donePending.current -= 1;
+          setQueueNotice(err instanceof Error ? err.message : "Could not save Done");
+          if (donePending.current === 0) await loadDoneList();
+        }
+      });
+    },
+    [commitDone, loadDoneList],
+  );
+
+  const toggleDone = useCallback(
+    (video: Video) => {
+      const manual = doneRef.current.items.some((item) => item.id === video.id);
+      mutateDone({ type: manual ? "undone" : "done", id: video.id });
+    },
+    [mutateDone],
+  );
+
   useEffect(() => {
-    const first = setTimeout(() => void loadQueue(), 0);
+    const first = setTimeout(() => {
+      void loadQueue();
+      void loadDoneList();
+    }, 0);
     // The same Queue on phone and laptop: re-read it whenever this tab is shown again.
     const onVisible = () => {
-      if (document.visibilityState === "visible") void loadQueue();
+      if (document.visibilityState === "visible") {
+        void loadQueue();
+        void loadDoneList();
+      }
     };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
@@ -110,7 +179,7 @@ export default function App() {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
     };
-  }, [loadQueue]);
+  }, [loadQueue, loadDoneList]);
 
   const ids = useMemo(() => queueIds(queue), [queue]);
   const idSet = useMemo(() => new Set(ids), [ids]);
@@ -239,6 +308,7 @@ export default function App() {
   const refreshLibrary = useCallback(async () => {
     setLoading(true);
     void loadQueue();
+    void loadDoneList();
     try {
       await loadLibrary();
     } catch (err) {
@@ -246,7 +316,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [loadLibrary, loadQueue]);
+  }, [loadLibrary, loadQueue, loadDoneList]);
 
   return (
     <div
@@ -302,6 +372,7 @@ export default function App() {
             error={error}
             available={queueAvailable}
             onToggle={toggleQueue}
+            done={{ available: doneAvailable, onToggle: toggleDone }}
             onMove={moveInQueue}
             onReorder={reorderQueue}
           />
@@ -311,6 +382,7 @@ export default function App() {
             loading={loading}
             error={error}
             onReset={resetFilters}
+            done={{ available: doneAvailable, onToggle: toggleDone }}
             queue={{ available: queueAvailable, ids: idSet, onToggle: toggleQueue }}
           />
         )}
