@@ -393,7 +393,7 @@ assert.equal(moreById.datevid0001.category, "dating");
 assert.equal(moreById.trailvid001.category, "trailers");
 assert.equal(moreById.packvid0001.category, "travel");
 
-assert.match(libraryTs, /categories: \["tech"\]/);
+assert.match(libraryTs, /statuses: \[\],\n  includeDropped: false,\n  categories: \[\],/);
 assert.match(libraryTs, /label: "Health \/ longevity"/);
 
 assert.equal(formatRemaining(0), "Done");
