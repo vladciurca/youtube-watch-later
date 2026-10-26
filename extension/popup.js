@@ -1,3 +1,5 @@
+import { reasonLabel, summarizeJob } from "./done-sync.js";
+
 const DEFAULT_API = "https://youtube-watch-later.vercel.app";
 
 const apiUrl = document.getElementById("apiUrl");
@@ -73,4 +75,118 @@ syncButton.addEventListener("click", async () => {
   } finally {
     syncButton.disabled = false;
   }
+});
+
+// ---------------------------------------------------------------------------
+// Sync Done to YouTube (manual; always asks before starting)
+// ---------------------------------------------------------------------------
+
+const JOB_KEY = "doneSyncJob";
+const SKIPPED_KEY = "doneSyncSkipped";
+const doneSyncButton = document.getElementById("doneSync");
+const doneConfirm = document.getElementById("doneConfirm");
+const doneConfirmText = document.getElementById("doneConfirmText");
+const doneStart = document.getElementById("doneStart");
+const doneCancelConfirm = document.getElementById("doneCancelConfirm");
+const doneProgress = document.getElementById("doneProgress");
+const doneProgressText = document.getElementById("doneProgressText");
+const doneCancel = document.getElementById("doneCancel");
+const doneRetry = document.getElementById("doneRetry");
+
+function describeJob(job) {
+  let text = summarizeJob(job);
+  if (job.state === "running" && job.current?.title) {
+    text += `\nNow: ${job.current.title}`;
+  }
+  if (job.state !== "running") {
+    if (job.total === 0 && job.failed[0]?.detail) text = `Could not start: ${job.failed[0].detail}`;
+    const details = [...job.failed, ...job.skipped]
+      .slice(0, 4)
+      .map((item) => `${item.id}: ${reasonLabel(item.reason)}`);
+    if (details.length) text += `\n${details.join("\n")}`;
+  }
+  return text;
+}
+
+async function renderDoneJob() {
+  const stored = await chrome.storage.local.get([JOB_KEY, SKIPPED_KEY]);
+  const job = stored[JOB_KEY];
+  const running = job?.state === "running";
+  doneProgress.hidden = !job || job.state === "idle";
+  doneProgressText.style.whiteSpace = "pre-line";
+  doneProgressText.textContent = job ? describeJob(job) : "";
+  doneCancel.hidden = !running;
+  doneSyncButton.disabled = running;
+  const skippedCount = Object.keys(stored[SKIPPED_KEY] ?? {}).length;
+  doneRetry.hidden = running || skippedCount === 0;
+  doneRetry.textContent = `Retry ${skippedCount} skipped video${skippedCount === 1 ? "" : "s"}`;
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && (changes[JOB_KEY] || changes[SKIPPED_KEY])) void renderDoneJob();
+});
+await renderDoneJob();
+
+doneSyncButton.addEventListener("click", async () => {
+  await persist();
+  doneSyncButton.disabled = true;
+  doneConfirm.hidden = true;
+  setStatus("Checking which Done videos still need syncing…");
+  try {
+    const preview = await chrome.runtime.sendMessage({ type: "DONE_SYNC_PREVIEW" });
+    if (!preview?.ok) throw new Error(preview?.error || "Could not read the Done list");
+    if (preview.count === 0) {
+      setStatus(
+        `Nothing to sync. ${preview.totalDone} marked Done in the library; the rest are already watched on YouTube, already synced, or skipped.`,
+        "ok",
+      );
+      return;
+    }
+    const c = preview.counts;
+    const skipNote = [
+      c.alreadyWatched ? `${c.alreadyWatched} already watched` : "",
+      c.alreadySynced ? `${c.alreadySynced} already synced` : "",
+      c.previouslySkipped ? `${c.previouslySkipped} skipped before` : "",
+    ]
+      .filter(Boolean)
+      .join(", ");
+    doneConfirmText.textContent =
+      `Mark ${preview.count} video${preview.count === 1 ? "" : "s"} as watched on YouTube?` +
+      (skipNote ? ` (Skipping ${skipNote}.)` : "") +
+      " Each one opens in a small muted window for about 15–30 seconds, one at a time, then closes. Please do not use that window.";
+    doneConfirm.hidden = false;
+    setStatus("");
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : String(error), "error");
+  } finally {
+    doneSyncButton.disabled = false;
+    void renderDoneJob();
+  }
+});
+
+doneCancelConfirm.addEventListener("click", () => {
+  doneConfirm.hidden = true;
+});
+
+doneStart.addEventListener("click", async () => {
+  doneConfirm.hidden = true;
+  setStatus("Starting…");
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "DONE_SYNC_START", confirmed: true });
+    if (!result?.ok) throw new Error(result?.error || "Could not start");
+    setStatus("");
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : String(error), "error");
+  }
+});
+
+doneCancel.addEventListener("click", async () => {
+  doneCancel.disabled = true;
+  await chrome.runtime.sendMessage({ type: "DONE_SYNC_CANCEL" });
+  doneCancel.disabled = false;
+});
+
+doneRetry.addEventListener("click", async () => {
+  await chrome.runtime.sendMessage({ type: "DONE_SYNC_CLEAR_SKIPPED" });
+  setStatus("Skipped videos will be included next time. Click Sync Done to YouTube.");
 });
