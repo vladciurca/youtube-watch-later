@@ -75,3 +75,59 @@ button:disabled {
 #status.is-ok {
   color: #3dd68c;
 }
+
+button.secondary {
+  background: #1b1b22;
+  border: 1px solid #3d3d4a;
+  color: #f2f2f5;
+}
+
+button.link {
+  background: none;
+  padding: 2px 0;
+  color: #8c8c97;
+  font-weight: 400;
+  text-align: left;
+  text-decoration: underline;
+}
+
+.done-sync {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid #23232c;
+}
+
+.done-sync h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #23232c;
+  border-radius: 6px;
+  background: #0c0c10;
+}
+
+.confirm p {
+  margin: 0;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+}
+
+.row button {
+  flex: 1;
+}
+
+[hidden] {
+  display: none !important;
+}

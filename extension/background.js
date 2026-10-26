@@ -1,3 +1,10 @@
+import {
+  finishJob,
+  initialJob,
+  recordResult,
+  selectDoneToSync,
+} from "./done-sync.js";
+
 const WL_URL = "https://www.youtube.com/playlist?list=WL";
 const DEFAULT_API = "https://youtube-watch-later.vercel.app";
 
@@ -169,5 +176,259 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
     });
 
+  return true;
+});
+
+// ---------------------------------------------------------------------------
+// Sync Done to YouTube (manual only). Nothing here runs unless the popup sends
+// DONE_SYNC_PREVIEW and then DONE_SYNC_START after the user confirms.
+// ---------------------------------------------------------------------------
+
+const JOB_KEY = "doneSyncJob";
+const SYNCED_KEY = "doneSynced";
+const SKIPPED_KEY = "doneSyncSkipped";
+const PER_VIDEO_TIMEOUT_MS = 100000;
+const DEFAULT_WATCH_BASE = "https://www.youtube.com/watch";
+
+let jobActive = false;
+let cancelRequested = false;
+let currentWindowId = null;
+
+// A service worker restart kills a running job; never leave it looking alive.
+(async () => {
+  const stored = await chrome.storage.local.get([JOB_KEY]);
+  const job = stored[JOB_KEY];
+  if (job?.state === "running") {
+    await chrome.storage.local.set({
+      [JOB_KEY]: { ...job, state: "interrupted", current: null, finishedAt: Date.now() },
+    });
+  }
+})();
+
+async function fetchJson(url) {
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) throw new Error(`${url.replace(/^https?:\/\/[^/]+/, "")} returned ${response.status}`);
+  return response.json();
+}
+
+async function previewDoneSync() {
+  const { apiUrl } = await getSettings();
+  const [done, library, stored] = await Promise.all([
+    fetchJson(`${apiUrl}/api/done`),
+    fetchJson(`${apiUrl}/api/library`),
+    chrome.storage.local.get([SYNCED_KEY, SKIPPED_KEY]),
+  ]);
+  const selection = selectDoneToSync({
+    doneItems: done.items ?? [],
+    videos: library.videos ?? [],
+    synced: stored[SYNCED_KEY] ?? {},
+    skipped: stored[SKIPPED_KEY] ?? {},
+  });
+  return {
+    ok: true,
+    count: selection.toSync.length,
+    counts: selection.counts,
+    totalDone: (done.items ?? []).length,
+    titles: selection.toSync.slice(0, 5).map((video) => video.title),
+  };
+}
+
+function waitForTabComplete(tabId, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let finished = false;
+    const done = (fn, value) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(listener);
+      fn(value);
+    };
+    const timer = setTimeout(() => done(reject, new Error("page load timed out")), timeoutMs);
+    const listener = (id, info) => {
+      if (id === tabId && info.status === "complete") done(resolve);
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    chrome.tabs.get(tabId).then(
+      (tab) => {
+        if (tab.status === "complete") done(resolve);
+      },
+      (error) => done(reject, error),
+    );
+  });
+}
+
+async function closeWindow(windowId) {
+  if (windowId == null) return;
+  try {
+    await chrome.windows.remove(windowId);
+  } catch {
+    // already closed
+  }
+}
+
+// One video. Chrome does not load or play media in hidden (background) tabs, so
+// each video opens in a small, unfocused popup window that is muted and closed
+// afterwards. If the OS still hides it (for example it is fully covered), the
+// runner reports "hidden" and the window is brought to the front for one retry.
+async function runInWindow(win, videoId) {
+  const tabId = win.tabs?.[0]?.id ?? null;
+  if (tabId == null) return { status: "error", detail: "no tab" };
+  try {
+    await chrome.tabs.update(tabId, { muted: true });
+  } catch {
+    // not fatal: the runner also mutes the player
+  }
+  // The runner waits for the player itself, so a slow "complete" event is not fatal.
+  await waitForTabComplete(tabId, 20000).catch(() => {});
+  await chrome.scripting.executeScript({ target: { tabId }, files: ["mark-watched.js"] });
+  const [injection] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (options) => window.__wlMarkWatched(options),
+    args: [{ videoId }],
+  });
+  if (injection?.error) return { status: "error", detail: String(injection.error.message || injection.error) };
+  return injection?.result || { status: "error", detail: "no result" };
+}
+
+async function markVideoWatched(videoId, watchBase) {
+  let windowId = null;
+  const work = (async () => {
+    const win = await chrome.windows.create({
+      url: `${watchBase}?v=${encodeURIComponent(videoId)}`,
+      type: "popup",
+      focused: false,
+      width: 420,
+      height: 300,
+      left: 20,
+      top: 20,
+    });
+    windowId = win.id ?? null;
+    currentWindowId = windowId;
+    let result = await runInWindow(win, videoId);
+    if (result.status === "hidden" && windowId != null && !cancelRequested) {
+      await chrome.windows.update(windowId, { focused: true });
+      await chrome.tabs.reload(win.tabs[0].id);
+      result = await runInWindow(win, videoId);
+    }
+    return result;
+  })();
+
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ status: "timeout", detail: "per-video limit" }), PER_VIDEO_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([
+      work.catch((error) => ({ status: "error", detail: error instanceof Error ? error.message : String(error) })),
+      timeout,
+    ]);
+  } finally {
+    clearTimeout(timer);
+    await closeWindow(windowId);
+    currentWindowId = null;
+  }
+}
+
+async function saveJob(job) {
+  await chrome.storage.local.set({ [JOB_KEY]: job });
+}
+
+async function runDoneSync() {
+  const { apiUrl } = await getSettings();
+  const stored = await chrome.storage.local.get(["watchBase"]);
+  const watchBase = stored.watchBase || DEFAULT_WATCH_BASE;
+  // Re-read the list at start so the confirmed count and the run agree.
+  const [done, library, state] = await Promise.all([
+    fetchJson(`${apiUrl}/api/done`),
+    fetchJson(`${apiUrl}/api/library`),
+    chrome.storage.local.get([SYNCED_KEY, SKIPPED_KEY]),
+  ]);
+  const { toSync } = selectDoneToSync({
+    doneItems: done.items ?? [],
+    videos: library.videos ?? [],
+    synced: state[SYNCED_KEY] ?? {},
+    skipped: state[SKIPPED_KEY] ?? {},
+  });
+
+  let job = initialJob(toSync);
+  await saveJob(job);
+  const keepAlive = setInterval(() => void chrome.runtime.getPlatformInfo(), 20000);
+  try {
+    for (const video of toSync) {
+      if (cancelRequested) break;
+      job = { ...job, current: { id: video.id, title: video.title }, cancelRequested };
+      await saveJob(job);
+      const result = await markVideoWatched(video.id, watchBase);
+      if (cancelRequested && result.status !== "ok") {
+        // The tab was closed by Cancel; do not count it as a failure.
+        job = { ...job, cancelRequested: true };
+        break;
+      }
+      job = recordResult(job, video, result);
+      if (result.status === "ok") {
+        const current = await chrome.storage.local.get([SYNCED_KEY]);
+        await chrome.storage.local.set({
+          [SYNCED_KEY]: { ...(current[SYNCED_KEY] ?? {}), [video.id]: Date.now() },
+        });
+      } else if (["live", "unavailable", "private", "age_restricted"].includes(result.status)) {
+        const current = await chrome.storage.local.get([SKIPPED_KEY]);
+        await chrome.storage.local.set({
+          [SKIPPED_KEY]: { ...(current[SKIPPED_KEY] ?? {}), [video.id]: result.status },
+        });
+      }
+      await saveJob(job);
+    }
+  } finally {
+    clearInterval(keepAlive);
+    job = finishJob({ ...job, cancelRequested });
+    await saveJob(job);
+    jobActive = false;
+    cancelRequested = false;
+  }
+}
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  const type = message?.type;
+  if (!["DONE_SYNC_PREVIEW", "DONE_SYNC_START", "DONE_SYNC_CANCEL", "DONE_SYNC_CLEAR_SKIPPED"].includes(type)) {
+    return undefined;
+  }
+
+  (async () => {
+    if (type === "DONE_SYNC_PREVIEW") return previewDoneSync();
+    if (type === "DONE_SYNC_CANCEL") {
+      cancelRequested = true;
+      await closeWindow(currentWindowId);
+      return { ok: true };
+    }
+    if (type === "DONE_SYNC_CLEAR_SKIPPED") {
+      await chrome.storage.local.remove([SKIPPED_KEY]);
+      return { ok: true };
+    }
+    // DONE_SYNC_START: only with an explicit confirmation from the popup.
+    if (message.confirmed !== true) throw new Error("Confirmation required.");
+    if (jobActive) throw new Error("A Done sync is already running.");
+    jobActive = true;
+    cancelRequested = false;
+    runDoneSync().catch(async (error) => {
+      jobActive = false;
+      await saveJob({
+        state: "interrupted",
+        total: 0,
+        index: 0,
+        current: null,
+        ok: [],
+        failed: [{ id: "-", reason: "error", detail: error instanceof Error ? error.message : String(error) }],
+        skipped: [],
+        cancelRequested: false,
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+      });
+    });
+    return { ok: true };
+  })()
+    .then(sendResponse)
+    .catch((error) => {
+      sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    });
   return true;
 });

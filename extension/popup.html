@@ -25,6 +25,27 @@
 
       <button id="sync" type="button">Sync Watch Later</button>
       <p id="status" role="status"></p>
+
+      <section class="done-sync" aria-labelledby="done-sync-title">
+        <h2 id="done-sync-title">Sync Done to YouTube</h2>
+        <p class="lede">
+          Marks the videos you set to Done in the library as watched on YouTube.
+          Manual only: it never runs on its own.
+        </p>
+        <button id="doneSync" type="button" class="secondary">Sync Done to YouTube</button>
+        <div id="doneConfirm" class="confirm" hidden>
+          <p id="doneConfirmText"></p>
+          <div class="row">
+            <button id="doneStart" type="button">Start</button>
+            <button id="doneCancelConfirm" type="button" class="secondary">Not now</button>
+          </div>
+        </div>
+        <div id="doneProgress" class="confirm" hidden>
+          <p id="doneProgressText"></p>
+          <button id="doneCancel" type="button" class="secondary">Cancel</button>
+        </div>
+        <button id="doneRetry" type="button" class="link" hidden>Retry skipped videos</button>
+      </section>
     </main>
     <script src="popup.js" type="module"></script>
   </body>
