@@ -54,14 +54,17 @@ If a video already has `techBusiness: true` from the sheet or previous library, 
 
 Each row shows the YouTube published date (`publishedTimeText` / "4 weeks ago"), parsed to ISO at scrape time. **Published** sorts newest first; videos without a date sort last. Later scrapes that omit a date keep the previous `publishedAt`.
 
-Status is recomputed from watched percent:
+Status is recomputed from watched percent (`statusFromWatchedPct` in `api/_lib/progress.mjs`; the browser re-derives it on load so older stored statuses follow the same rules):
 
 | Watched % | Status |
 | --- | --- |
-| 90+ | Almost finished |
+| 95+ | Done |
+| 90–94 | Almost finished |
 | 40–89 | Partially watched |
 | 10–39 | Barely started |
 | 0–9 | Not started |
+
+**Done** is one shared threshold, `DONE_THRESHOLD_PCT = 95` in `api/_lib/threshold.mjs`, used by the UI (`isDone`), the Queue auto-removal (`isDoneVideo`), the "Done" label and the locked check. It depends only on watch progress, not on whether the video is still in the playlist. A missing or null `watchedPct` is never Done, and an unknown duration (0s) no longer makes a video Done. Marking done by hand (`done.json`) still works below 95% and survives syncs.
 
 `remainingSec = durationSec * (1 - watchedPct / 100)`. Resume `t` comes from playlist progress.
 

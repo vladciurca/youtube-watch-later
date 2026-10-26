@@ -56,7 +56,7 @@ export function applyDoneOverrides(videos, doneIn) {
   if (ids.size === 0 || !Array.isArray(videos)) return videos;
   return videos.map((video) =>
     video && ids.has(video.id)
-      ? { ...video, watchedPct: 100, remainingSec: 0, markedDone: true }
+      ? { ...video, watchedPct: 100, remainingSec: 0, status: "Done", markedDone: true }
       : video,
   );
 }

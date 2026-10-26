@@ -1,4 +1,5 @@
 export const WATCH_STATUSES = [
+  "Done",
   "Almost finished",
   "Partially watched",
   "Barely started",

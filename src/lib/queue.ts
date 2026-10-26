@@ -1,12 +1,13 @@
 import { applyQueueOp, emptyQueue, normalizeQueue, queueIds } from "../../api/_lib/queue.mjs";
 import type { Queue, QueueOp } from "../../api/_lib/queue.mjs";
 import type { Video } from "../types";
+import { isDoneVideo } from "../../api/_lib/threshold.mjs";
 
 export type { Queue, QueueOp };
 export { applyQueueOp, emptyQueue, normalizeQueue, queueIds };
 
-export function isDone(video: Pick<Video, "remainingSec">): boolean {
-  return video.remainingSec <= 0;
+export function isDone(video: Pick<Video, "watchedPct">): boolean {
+  return isDoneVideo(video);
 }
 
 /** Queued videos, in queue order. Ids the library does not know are skipped. */

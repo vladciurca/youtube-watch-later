@@ -1,6 +1,7 @@
 import type { Video, WatchStatus } from "../types";
 import {
   formatRemaining,
+  isDone,
   publishedDisplay,
   thumbnailUrl,
   youtubeResumeUrl,
@@ -26,6 +27,7 @@ interface VideoRowProps {
 }
 
 const STATUS_CLASS: Record<WatchStatus, string> = {
+  Done: "done",
   "Almost finished": "almost",
   "Partially watched": "partial",
   "Barely started": "barely",
@@ -39,7 +41,7 @@ export function StarButton({
   video: Video;
   queue: QueueControls;
 }) {
-  const done = video.remainingSec <= 0;
+  const done = isDone(video);
   const disabled = !queue.available || (done && !queue.queued);
   const label = queue.queued ? "Remove from Queue" : "Add to Queue";
   const title = !queue.available
@@ -71,22 +73,22 @@ export function StarButton({
 }
 
 export function DoneButton({ video, done }: { video: Video; done: DoneControls }) {
-  const finished = video.remainingSec <= 0;
+  const finished = isDone(video);
   const manual = video.markedDone === true;
-  // Finished on YouTube (100%) can't be undone here; only an explicit Done can.
+  // Done from watch progress (95%+) can't be undone here; only an explicit Done can.
   const locked = finished && !manual;
   const label = manual ? "Mark not done" : "Mark done";
   const title = !done.available
     ? "Saving is unavailable right now"
     : locked
-      ? "Finished on YouTube"
+      ? "Finished (95%+ watched)"
       : label;
   return (
     <button
       type="button"
       className={`done-btn${finished ? " is-on" : ""}`}
       aria-pressed={finished}
-      aria-label={locked ? "Finished on YouTube" : label}
+      aria-label={locked ? "Finished (95%+ watched)" : label}
       title={title}
       disabled={!done.available || locked}
       onClick={() => done.onToggle(video)}
@@ -176,7 +178,7 @@ export function VideoRow({ video, queue, done }: VideoRowProps) {
           >
             <span className="progress-fill" style={{ width: `${pct}%` }} />
           </div>
-          <span className="remaining">{formatRemaining(video.remainingSec)}</span>
+          <span className="remaining">{isDone(video) ? "Done" : formatRemaining(video.remainingSec)}</span>
         </div>
       </div>
     </a>

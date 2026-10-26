@@ -58,9 +58,9 @@ assert.deepEqual(queueIds(normalizeQueue({ items: [A, { id: A }, { id: "bad" }, 
 
 // ---- Done leaves the queue; Dropped and unknown ids stay
 const videos = [
-  { id: A, remainingSec: 0, droppedAt: null },
-  { id: B, remainingSec: 300, droppedAt: "2026-10-01T00:00:00.000Z" },
-  { id: C, remainingSec: 120, droppedAt: null },
+  { id: A, watchedPct: 100, remainingSec: 0, droppedAt: null },
+  { id: B, watchedPct: 60, remainingSec: 300, droppedAt: "2026-10-01T00:00:00.000Z" },
+  { id: C, watchedPct: 94, remainingSec: 120, droppedAt: null },
 ];
 const pruned = pruneDoneFromQueue(
   { items: [{ id: A }, { id: B }, { id: C }, { id: D }] },

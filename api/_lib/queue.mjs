@@ -4,6 +4,8 @@
 // it. It never touches YouTube's real Watch Later playlist.
 
 export const MAX_QUEUE = 500;
+import { isDoneVideo } from "./threshold.mjs";
+
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 
 export function isVideoId(value) {
@@ -103,9 +105,7 @@ export function applyQueueOp(queueIn, op, now = new Date().toISOString()) {
   }
 }
 
-export function isDoneVideo(video) {
-  return Number.isFinite(video?.remainingSec) && video.remainingSec <= 0;
-}
+export { isDoneVideo };
 
 /**
  * Drop queued videos that are Done (nothing left to watch). Videos that are

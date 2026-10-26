@@ -9,6 +9,7 @@ import {
   activeFilterCount,
   categoryCounts,
   filterAndSortVideos,
+  withDerivedStatus,
   statusCounts,
 } from "./lib/library";
 import {
@@ -106,7 +107,7 @@ export default function App() {
   );
 
   const videos = useMemo(
-    () => applyDoneOverrides(rawVideos, doneList),
+    () => withDerivedStatus(applyDoneOverrides(rawVideos, doneList)),
     [rawVideos, doneList],
   );
 

@@ -83,7 +83,11 @@ const leftoverBeforeDone = remainingOrder.findIndex((video) => video.remainingSe
 assert.ok(leftoverBeforeDone === leftover.length);
 
 // Status buckets
-assert.equal(statusFromWatchedPct(100), "Almost finished");
+assert.equal(statusFromWatchedPct(100), "Done");
+assert.equal(statusFromWatchedPct(99), "Done");
+assert.equal(statusFromWatchedPct(95), "Done");
+assert.equal(statusFromWatchedPct(94), "Almost finished");
+assert.equal(statusFromWatchedPct(94.99), "Almost finished");
 assert.equal(statusFromWatchedPct(90), "Almost finished");
 assert.equal(statusFromWatchedPct(89), "Partially watched");
 assert.equal(statusFromWatchedPct(40), "Partially watched");

@@ -9,6 +9,7 @@
   --faint: #5c5c66;
   --red: #e23d3d;
   --red-dim: #8a2222;
+  --done: #2fbf7a;
   --almost: #3dd68c;
   --partial: #f0a43a;
   --barely: #7aa2f7;
@@ -184,6 +185,9 @@ p {
   background: #17171d;
 }
 
+.chip-done.is-on {
+  border-color: color-mix(in srgb, var(--done) 55%, var(--line));
+}
 .chip-almost.is-on {
   border-color: color-mix(in srgb, var(--almost) 45%, var(--line));
 }
@@ -502,6 +506,9 @@ p {
   letter-spacing: 0.02em;
 }
 
+.status-pill.done {
+  color: var(--done);
+}
 .status-pill.almost {
   color: var(--almost);
 }
