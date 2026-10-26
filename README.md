@@ -100,6 +100,15 @@ npm run preview
 
 Click a row to open `https://www.youtube.com/watch?v={id}&t={t}s` in a new tab. That click does not change `watchedPct` or `status`.
 
+## Queue
+
+A star on every row adds or removes a video from the **Queue**. The **Queue** tab (with a count) shows only queued videos in queue order; the app still opens on **All** with no filters. Reorder by dragging the handle (works by touch), or use the move-to-top / up / down buttons. Filters and sort do not apply inside the Queue.
+
+- Stored server-side in its own private Blob, `watch-later/queue.json`, via `/api/queue` (GET list, POST `{ op }` with `add | remove | top | up | down | reorder`). Phone and laptop read the same list; each re-reads it when the tab is focused or Refresh is pressed. **No database migration is needed.**
+- The extension sync rewrites only `watch-later/library.json`. It never writes queue data, and a video that becomes Dropped stays queued. After a sync the only change is that videos now **Done** (nothing left to watch) leave the Queue; the Queue API does the same when it is read. Tapping the star again also removes a video.
+- The Queue never touches YouTube's real Watch Later playlist.
+- If the Queue API cannot be reached (e.g. no `BLOB_READ_WRITE_TOKEN`), stars are disabled and the tab says the Queue is unavailable; the rest of the library works as before.
+
 ## Out of scope
 
 Backend scrapes that use your YouTube cookies, sheet writes, Origin mirroring, and public-library auth. The write API is secret-header protected; the library itself stays public.

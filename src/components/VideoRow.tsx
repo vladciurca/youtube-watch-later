@@ -6,8 +6,16 @@ import {
   youtubeResumeUrl,
 } from "../lib/library";
 
+export interface QueueControls {
+  /** False when the queue backend could not be reached. */
+  available: boolean;
+  queued: boolean;
+  onToggle: (video: Video) => void;
+}
+
 interface VideoRowProps {
   video: Video;
+  queue?: QueueControls;
 }
 
 const STATUS_CLASS: Record<WatchStatus, string> = {
@@ -17,11 +25,49 @@ const STATUS_CLASS: Record<WatchStatus, string> = {
   "Not started": "notstarted",
 };
 
-export function VideoRow({ video }: VideoRowProps) {
+export function StarButton({
+  video,
+  queue,
+}: {
+  video: Video;
+  queue: QueueControls;
+}) {
+  const done = video.remainingSec <= 0;
+  const disabled = !queue.available || (done && !queue.queued);
+  const label = queue.queued ? "Remove from Queue" : "Add to Queue";
+  const title = !queue.available
+    ? "Queue is unavailable right now"
+    : done && !queue.queued
+      ? "Done videos can't be queued"
+      : label;
+  return (
+    <button
+      type="button"
+      className={`star-btn${queue.queued ? " is-on" : ""}`}
+      aria-pressed={queue.queued}
+      aria-label={label}
+      title={title}
+      disabled={disabled}
+      onClick={() => queue.onToggle(video)}
+    >
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <path
+          d="M12 3.2l2.7 5.6 6.1.8-4.5 4.2 1.1 6.1L12 17l-5.4 2.9 1.1-6.1L3.2 9.6l6.1-.8z"
+          fill={queue.queued ? "currentColor" : "none"}
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </button>
+  );
+}
+
+export function VideoRow({ video, queue }: VideoRowProps) {
   const pct = Math.min(100, Math.max(0, video.watchedPct));
   const published = publishedDisplay(video);
 
-  return (
+  const row = (
     <a
       className="video-row"
       href={youtubeResumeUrl(video)}
@@ -81,5 +127,15 @@ export function VideoRow({ video }: VideoRowProps) {
         </div>
       </div>
     </a>
+  );
+
+  if (!queue) return row;
+  return (
+    <div className="video-item">
+      {row}
+      <div className="row-actions">
+        <StarButton video={video} queue={queue} />
+      </div>
+    </div>
   );
 }

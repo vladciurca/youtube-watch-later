@@ -1,6 +1,8 @@
 import type { LibraryFilters, SortKey } from "../types";
 import { SORT_OPTIONS } from "../lib/library";
 
+export type LibraryView = "all" | "queue";
+
 interface HeaderProps {
   matchCount: number | null;
   totalCount: number;
@@ -15,6 +17,9 @@ interface HeaderProps {
   onQueryChange: (query: string) => void;
   onSortChange: (sort: SortKey) => void;
   onRefresh: () => void;
+  view: LibraryView;
+  queueCount: number | null;
+  onViewChange: (view: LibraryView) => void;
 }
 
 function formatSyncedAt(syncedAt: string): string {
@@ -47,6 +52,9 @@ export function Header({
   onQueryChange,
   onSortChange,
   onRefresh,
+  view,
+  queueCount,
+  onViewChange,
 }: HeaderProps) {
   const stale = isStale(syncedAt, live);
   const hint = partial
@@ -65,7 +73,28 @@ export function Header({
         };
 
   return (
-    <header className="topbar">
+    <header className={`topbar${view === "queue" ? " is-queue" : ""}`}>
+      <div className="view-tabs" role="tablist" aria-label="Library view">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === "all"}
+          className={`view-tab${view === "all" ? " is-on" : ""}`}
+          onClick={() => onViewChange("all")}
+        >
+          All
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === "queue"}
+          className={`view-tab${view === "queue" ? " is-on" : ""}`}
+          onClick={() => onViewChange("queue")}
+        >
+          Queue
+          <span className="tab-count">{queueCount ?? "—"}</span>
+        </button>
+      </div>
       <div className="mobile-tools">
         <label className="search-field mobile-search">
           <span className="sr-only">Search title or author</span>
@@ -110,7 +139,11 @@ export function Header({
         <div className="topbar-copy">
           <p className="count">
             <strong>{matchCount === null ? "—" : matchCount}</strong>
-            <span> of {totalCount || "—"}</span>
+            {view === "queue" ? (
+              <span> queued</span>
+            ) : (
+              <span> of {totalCount || "—"}</span>
+            )}
           </p>
           <div className="sync-meta">
             <p className="source">

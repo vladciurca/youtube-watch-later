@@ -5,6 +5,9 @@
     },
     "api/library.js": {
       "includeFiles": "public/data/videos.json"
+    },
+    "api/queue.js": {
+      "includeFiles": "public/data/videos.json"
     }
   }
 }

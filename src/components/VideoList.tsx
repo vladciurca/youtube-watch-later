@@ -1,14 +1,20 @@
 import type { Video } from "../types";
 import { VideoRow } from "./VideoRow";
+import type { QueueControls } from "./VideoRow";
 
 interface VideoListProps {
   videos: Video[];
   loading: boolean;
   error: string | null;
   onReset: () => void;
+  queue?: {
+    available: boolean;
+    ids: Set<string>;
+    onToggle: QueueControls["onToggle"];
+  };
 }
 
-export function VideoList({ videos, loading, error, onReset }: VideoListProps) {
+export function VideoList({ videos, loading, error, onReset, queue }: VideoListProps) {
   if (loading) {
     return (
       <div className="list" aria-busy="true">
@@ -42,7 +48,19 @@ export function VideoList({ videos, loading, error, onReset }: VideoListProps) {
   return (
     <div className="list">
       {videos.map((video) => (
-        <VideoRow key={video.id} video={video} />
+        <VideoRow
+          key={video.id}
+          video={video}
+          queue={
+            queue
+              ? {
+                  available: queue.available,
+                  queued: queue.ids.has(video.id),
+                  onToggle: queue.onToggle,
+                }
+              : undefined
+          }
+        />
       ))}
     </div>
   );
