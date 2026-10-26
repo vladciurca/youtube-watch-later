@@ -27,9 +27,9 @@ export const CATEGORY_OPTIONS: { key: VideoCategory; label: string }[] = [
 ];
 
 export const DEFAULT_FILTERS: LibraryFilters = {
-  statuses: ["Almost finished"],
+  statuses: [],
   includeDropped: false,
-  categories: ["tech"],
+  categories: [],
   query: "",
   sort: "saved",
 };

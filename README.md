@@ -95,8 +95,7 @@ npm run preview
 
 ## Default view
 
-- Status: **Almost finished** only (single-select chips; click another status to switch immediately; click the selected chip to show all)
-- Category: **Tech / Business** selected (click another category chip to switch; click the selected chip to show all)
+- No filters: every video shows on load, including Done and Dropped. Status and category chips start unselected (single-select chips; click one to filter, click the selected chip to show all again). The search box starts empty and the Dropped toggle starts off, which does not hide dropped videos while no status is selected.
 - Sort: **Saved** — YouTube Watch Later order (`savedRank` 0 is the top of the list). Until the first sync, the seed has no rank and **Saved** keeps the seed's order. **Remaining** sorts least leftover time among unfinished videos first, Done / 100% last. Leftover under an hour shows `M:SS` (e.g. `6:00 left`); hours stay `1h 4m left`. **Published** sorts newest upload first, missing dates last. **Watched %** still sorts highest `watchedPct` first
 
 Click a row to open `https://www.youtube.com/watch?v={id}&t={t}s` in a new tab. That click does not change `watchedPct` or `status`.
