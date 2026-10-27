@@ -30,20 +30,28 @@ You can also unzip `extension/watch-later-sync.zip` and load that folder the sam
 4. The popup reports `Scraped N of M (stated), method innertube` (or `dom`). `M` is the playlist header count, such as `1,234 videos`. If Innertube is under 98% of that count, the extension scrolls the playlist until the row count stops growing and keeps whichever scrape has more unique videos
 5. Refresh the site. `savedRank` matches that scraped order. Videos the scrape missed stay after those, in their previous order. Videos gone from a full Watch Later scrape keep their last snapshot and appear under **Dropped**. A short scrape does not mass-drop the rest of the library
 
-## Automatic daily sync (v1.5.0)
+## Automatic daily sync (v1.5.0, fixes in v1.5.1)
 
 While the browser is open, the extension syncs once a day on its own. An hourly alarm checks whether the last **successful** run is more than ~20 hours old, and a one-minute alarm at browser start (and after install/update) catches up if Arc/Chrome was closed. Each run:
 
-1. **Scrape + upload** (the same as **Sync Watch Later**), using an inactive tab: it reuses an open Watch Later tab without focusing it, or opens one in the background and closes it afterwards. It needs you to be signed in to YouTube in that browser; if not, the run fails with a clear message.
+1. **Scrape + upload** (the same as **Sync Watch Later**), using an inactive tab: it reuses an open Watch Later tab without focusing it, or opens one in the background and closes it afterwards. A reused tab is **reloaded first** (since 1.5.1): a Watch Later tab left open or put to sleep still holds the page data from whenever it loaded, so videos added since then would be missed. It needs you to be signed in to YouTube in that browser; if not, the run fails with a clear message.
 2. **Optional Done step**, off by default: tick *Also mark Done videos watched* to let each run also push your explicitly-marked Done videos to YouTube, capped at **5 per run**, only videos marked Done in the app, same skip rules as the manual button. It opens the small muted window described below, so it is opt-in. The Done step marks videos *watched*; it does **not** remove anything from Watch Later (that is not implemented).
 
-Safety: failures never loop (after a failure the next try is at least 2 hours later, and after 3 failures in a row at least 20 hours later); one run at a time; nothing runs without the sync secret. The popup has an **Auto-sync daily** checkbox (default on), a **Run now** button (same routine, ignores the 20 h wait), and shows the last run time and result. The sync secret is handled exactly as before and is never shown. New permission: `alarms`.
+Safety: failures never loop (after a failure the next try is at least 2 hours later, and after 3 failures in a row at least 20 hours later); one run at a time; nothing runs without the sync secret. An **incomplete** scrape (the server's `partial` flag) is not treated as the day's successful sync: it is retried on the 2 h backoff, and after 3 incomplete runs in a row it waits the full interval like any other stall.
 
-### Update to 1.5.0 (Arc/Chrome on Mac)
+The popup's **Automatic sync** block says, in this order:
 
-1. Unzip `watch-later-sync-1.5.0.zip` over the folder the extension is loaded from (or into a new folder).
-2. Open `arc://extensions` (or `chrome://extensions`). If you used the same folder, click the reload icon on **Watch Later Sync**. If you used a new folder, remove the old one and **Load unpacked** the new folder, then re-enter the Library URL and sync secret.
-3. Open the popup: you should see **Automatic sync** and version 1.5.0 on the extensions page. About a minute later the first catch-up run happens (the secret must already be set). Check the popup for the result.
+1. When the next real sync is due — `Next sync due about 08:50 tomorrow (checked hourly)`, `Next sync due now — the hourly check runs it within the hour`, `Running now…`, or `Next sync: never` when auto-sync is off or no secret is saved — and, when it is not due, why: *the last full sync is still recent* (fresh), *waiting after the last attempt* (backoff), *a run is already in progress*, *auto-sync is off*, *no sync secret is saved*.
+2. The last **full** sync and the last **attempt**: `Last full sync 6 h ago (08:50). Last run 6 h ago (ok): …`. `No full sync yet.` plus a `Last run … (failed)` line means it ran and failed; `Auto-sync has not run yet.` means it genuinely never started.
+3. The last cheap hourly check and what it decided, when that check skipped: `Last check 12 min ago: skipped (the last full sync is still recent).`
+
+Those skipped checks are kept in `chrome.storage.local` under `autoSync` as `lastCheckAt` and `lastSkipReason`. The sync secret is handled exactly as before and is never shown. New permission in 1.5.0: `alarms`.
+
+### Update to 1.5.1 (Arc/Chrome on Mac)
+
+1. Unzip `extension/watch-later-sync.zip` over the folder the extension is loaded from (or into a new folder).
+2. Open `arc://extensions` (or `chrome://extensions`). If you used the same folder, click the reload icon on **Watch Later Sync**. If you used a new folder, remove the old one and **Load unpacked** the new folder, then re-enter the Library URL and sync secret — a folder change gives the extension a new identity and an empty storage, and without the secret the automatic sync cannot run.
+3. Open the popup: you should see **Automatic sync** and version 1.5.1 on the extensions page, and a status block that starts with *Next sync…*. About a minute later the first catch-up run happens (the secret must already be set). Check the popup for the result, or press **Run now**.
 4. Keep Arc signed in to YouTube. Nothing in the app or API needs to change.
 
 ## Sync Done to YouTube (v1.4.0)

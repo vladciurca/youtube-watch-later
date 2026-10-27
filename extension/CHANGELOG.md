@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.1
+
+- A reused Watch Later tab is now reloaded before it is scraped. A tab left open (or put to sleep by Arc) still held the page data from whenever it loaded, so videos added to Watch Later since then were invisible to both the automatic and the manual sync.
+- Waiting for the playlist to load no longer misses a load that finished first, and no longer waits 45 s on a sleeping tab: the tab's current state is checked as well as the load event. This could fail every unattended run with "Timed out waiting for Watch Later to load".
+- An incomplete scrape no longer counts as a completed daily sync, so the next run is 2 h away instead of 20 h (capped: after 3 incomplete runs in a row it waits the full interval again).
+- The popup now says when the next sync is due and why the last check did not run one (fresh, backoff, disabled, no secret, already running), plus the time of the last full sync and the last attempt. Skipped hourly checks are recorded (`lastCheckAt`, `lastSkipReason`) so a quiet extension can be diagnosed.
+
 ## 1.5.0
 
 - Automatic daily sync while the browser is open: hourly alarm plus a startup catch-up when the last successful run is more than ~20 h old. Runs the normal scrape + upload in an inactive tab.

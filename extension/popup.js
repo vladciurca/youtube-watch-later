@@ -1,4 +1,9 @@
-import { describeLastRun, isAutoDoneEnabled, isAutoEnabled } from "./auto-sync.js";
+import {
+  AUTO_STALE_LOCK_MS,
+  describeAutoStatus,
+  isAutoDoneEnabled,
+  isAutoEnabled,
+} from "./auto-sync.js";
 import { reasonLabel, summarizeJob } from "./done-sync.js";
 
 const DEFAULT_API = "https://youtube-watch-later.vercel.app";
@@ -209,15 +214,21 @@ async function renderAuto() {
     AUTO_LOCK_KEY,
     "autoSyncEnabled",
     "autoDoneEnabled",
+    "syncSecret",
   ]);
   autoEnabled.checked = isAutoEnabled(stored.autoSyncEnabled);
   autoDone.checked = isAutoDoneEnabled(stored.autoDoneEnabled);
   autoDone.disabled = !autoEnabled.checked;
-  const running = !!stored[AUTO_LOCK_KEY] && Date.now() - stored[AUTO_LOCK_KEY] < 20 * 60 * 1000;
+  const running = !!stored[AUTO_LOCK_KEY] && Date.now() - stored[AUTO_LOCK_KEY] < AUTO_STALE_LOCK_MS;
   autoRun.disabled = running;
-  autoStatus.textContent = running
-    ? "Running now… (uses an inactive tab; this can take a minute)"
-    : describeLastRun(stored[AUTO_STATE_KEY]);
+  autoStatus.style.whiteSpace = "pre-line";
+  autoStatus.textContent = describeAutoStatus({
+    enabled: autoEnabled.checked,
+    // Only whether a secret exists, never its value.
+    hasSecret: !!(stored.syncSecret || syncSecret.value),
+    auto: stored[AUTO_STATE_KEY],
+    lockAt: stored[AUTO_LOCK_KEY],
+  });
 }
 
 autoEnabled.addEventListener("change", async () => {
@@ -236,7 +247,11 @@ autoRun.addEventListener("click", async () => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (
     area === "local" &&
-    (changes[AUTO_STATE_KEY] || changes[AUTO_LOCK_KEY] || changes.autoSyncEnabled || changes.autoDoneEnabled)
+    (changes[AUTO_STATE_KEY] ||
+      changes[AUTO_LOCK_KEY] ||
+      changes.autoSyncEnabled ||
+      changes.autoDoneEnabled ||
+      changes.syncSecret)
   ) {
     void renderAuto();
   }

@@ -5,6 +5,7 @@ import {
   isAutoDoneEnabled,
   isAutoEnabled,
   recordAttempt,
+  recordCheck,
   shouldRunAuto,
 } from "./auto-sync.js";
 import {
@@ -39,23 +40,38 @@ function isWatchLaterTab(tab) {
   }
 }
 
-function waitForComplete(tabId) {
+// Resolves when the tab has finished loading. The listener goes on before
+// anything is inspected, so a load that finishes immediately is never missed,
+// and the current status is checked too in case it finished before this call.
+// `fresh` skips that check to wait for the *next* completion (after a reload).
+function waitForTabComplete(tabId, timeoutMs, { fresh = false, what = "page" } = {}) {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
+    let finished = false;
+    const done = (fn, value) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
       chrome.tabs.onUpdated.removeListener(listener);
-      reject(new Error("Timed out waiting for Watch Later to load"));
-    }, 45000);
-
+      fn(value);
+    };
+    const timer = setTimeout(() => done(reject, new Error(`${what} load timed out`)), timeoutMs);
     const listener = (id, info) => {
-      if (id === tabId && info.status === "complete") {
-        clearTimeout(timeout);
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }
+      if (id === tabId && info.status === "complete") done(resolve);
     };
     chrome.tabs.onUpdated.addListener(listener);
+    if (fresh) return;
+    chrome.tabs.get(tabId).then(
+      // A tab the browser put to sleep reports "unloaded" and never fires
+      // "complete" on its own, so it must not be treated as ready.
+      (tab) => {
+        if (tab.status === "complete" && tab.discarded !== true) done(resolve);
+      },
+      (error) => done(reject, error),
+    );
   });
 }
+
+const WL_LOAD_TIMEOUT_MS = 45000;
 
 // background = unattended run: reuse an open Watch Later tab without focusing it,
 // or open one inactive. `created` tells the caller to close it afterwards.
@@ -66,15 +82,21 @@ async function findOrOpenWatchLater({ background = false } = {}) {
   const existing = tabs.find(isWatchLaterTab);
   if (existing?.id != null) {
     if (!background) await chrome.tabs.update(existing.id, { active: true });
-    if (existing.status !== "complete") {
-      await waitForComplete(existing.id);
-    }
+    // A Watch Later tab left open (or put to sleep) still holds the
+    // ytInitialData from whenever it loaded, so videos added since then would
+    // be invisible to the scrape. Always reload a tab we did not just open.
+    // The wait is started first so the reload's "complete" cannot be missed.
+    await Promise.all([
+      waitForTabComplete(existing.id, WL_LOAD_TIMEOUT_MS, { fresh: true, what: "Watch Later" }),
+      chrome.tabs.reload(existing.id),
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
     return { tabId: existing.id, created: false };
   }
 
   const created = await chrome.tabs.create({ url: WL_URL, active: !background });
   if (created.id == null) throw new Error("Could not open Watch Later");
-  await waitForComplete(created.id);
+  await waitForTabComplete(created.id, WL_LOAD_TIMEOUT_MS, { what: "Watch Later" });
   await new Promise((resolve) => setTimeout(resolve, 1500));
   return { tabId: created.id, created: true };
 }
@@ -263,30 +285,6 @@ async function previewDoneSync() {
     totalDone: (done.items ?? []).length,
     titles: selection.toSync.slice(0, 5).map((video) => video.title),
   };
-}
-
-function waitForTabComplete(tabId, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    let finished = false;
-    const done = (fn, value) => {
-      if (finished) return;
-      finished = true;
-      clearTimeout(timer);
-      chrome.tabs.onUpdated.removeListener(listener);
-      fn(value);
-    };
-    const timer = setTimeout(() => done(reject, new Error("page load timed out")), timeoutMs);
-    const listener = (id, info) => {
-      if (id === tabId && info.status === "complete") done(resolve);
-    };
-    chrome.tabs.onUpdated.addListener(listener);
-    chrome.tabs.get(tabId).then(
-      (tab) => {
-        if (tab.status === "complete") done(resolve);
-      },
-      (error) => done(reject, error),
-    );
-  });
 }
 
 async function closeWindow(windowId) {
@@ -508,26 +506,32 @@ async function runAuto(trigger, { force = false } = {}) {
     force,
   });
   if (!decision.run) {
+    // Even a cheap skipped check is written down, so the popup can say why
+    // nothing ran instead of looking like auto-sync never started.
+    let state = recordCheck(stored[AUTO_STATE_KEY], { now, reason: decision.reason });
     if (decision.reason === "no_secret" && (force || trigger === "manual")) {
-      await chrome.storage.local.set({
-        [AUTO_STATE_KEY]: recordAttempt(stored[AUTO_STATE_KEY], {
-          ok: false,
-          text: "Set the sync secret in this popup first.",
-          now,
-          trigger,
-        }),
+      state = recordAttempt(state, {
+        ok: false,
+        text: "Set the sync secret in this popup first.",
+        now,
+        trigger,
       });
     }
+    await chrome.storage.local.set({ [AUTO_STATE_KEY]: state });
     return { ok: false, skipped: decision.reason };
   }
 
   await chrome.storage.local.set({ [AUTO_LOCK_KEY]: now });
   const keepAlive = setInterval(() => void chrome.runtime.getPlatformInfo(), 20000);
   let ok = false;
+  let partial = false;
   let text = "";
   try {
     const result = await performWatchLaterSync({ background: true });
     ok = true;
+    // An incomplete scrape uploaded fine but did not read the whole playlist,
+    // so it is retried on the short backoff instead of 20 h later.
+    partial = result.partial === true;
     text = `Sync: ${describeSyncResult(result)}`;
     if (isAutoDoneEnabled(stored[AUTO_DONE_KEY])) {
       if (jobActive) {
@@ -550,11 +554,11 @@ async function runAuto(trigger, { force = false } = {}) {
     clearInterval(keepAlive);
     const latest = await chrome.storage.local.get([AUTO_STATE_KEY]);
     await chrome.storage.local.set({
-      [AUTO_STATE_KEY]: recordAttempt(latest[AUTO_STATE_KEY], { ok, text, now: Date.now(), trigger }),
+      [AUTO_STATE_KEY]: recordAttempt(latest[AUTO_STATE_KEY], { ok, partial, text, now: Date.now(), trigger }),
     });
     await chrome.storage.local.remove([AUTO_LOCK_KEY]);
   }
-  return { ok, text };
+  return { ok, partial, text };
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
