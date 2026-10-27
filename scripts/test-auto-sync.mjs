@@ -8,12 +8,15 @@ import {
   AUTO_MIN_INTERVAL_MS,
   AUTO_RETRY_MS,
   AUTO_STALE_LOCK_MS,
+  describeAutoStatus,
   describeDoneStep,
   describeLastRun,
   describeSyncResult,
   isAutoDoneEnabled,
   isAutoEnabled,
+  nextDueAt,
   recordAttempt,
+  recordCheck,
   shouldRunAuto,
 } from "../extension/auto-sync.js";
 
@@ -65,9 +68,123 @@ assert.equal(st.failedStreak, 2);
 st = recordAttempt(st, { ok: true, text: "fine", now: NOW + 2 * H, trigger: "manual" });
 assert.equal(st.failedStreak, 0);
 assert.equal(st.lastSuccessAt, NOW + 2 * H);
-assert.deepEqual(st.lastResult, { ok: true, text: "fine", at: NOW + 2 * H, trigger: "manual" });
+assert.deepEqual(st.lastResult, {
+  ok: true,
+  partial: false,
+  text: "fine",
+  at: NOW + 2 * H,
+  trigger: "manual",
+});
 const failAfterOk = recordAttempt(st, { ok: false, text: "x", now: NOW + 3 * H });
 assert.equal(failAfterOk.lastSuccessAt, NOW + 2 * H, "a failure keeps the last success time");
+
+// A partial scrape uploaded fine but did not read the whole playlist, so it is
+// not a completed sync: it must not push the next run 20 h out.
+const partial1 = recordAttempt(null, {
+  ok: true,
+  partial: true,
+  text: "Sync: scraped 40, looked incomplete so nothing was dropped",
+  now: NOW,
+  trigger: "daily",
+});
+assert.equal(partial1.lastSuccessAt, null, "a partial scrape is not a full success");
+assert.equal(partial1.partialStreak, 1);
+assert.equal(partial1.failedStreak, 0, "a partial scrape is not a failure either");
+assert.equal(shouldRunAuto({ ...base, now: NOW + H, auto: partial1 }).reason, "backoff");
+assert.equal(
+  shouldRunAuto({ ...base, now: NOW + AUTO_RETRY_MS + 60000, auto: partial1 }).run,
+  true,
+  "a partial scrape is retried after the 2 h backoff, not 20 h later",
+);
+// …but repeated partials must not retry every 2 h forever.
+let partialN = partial1;
+for (let i = 1; i < AUTO_MAX_FAILS; i += 1) {
+  partialN = recordAttempt(partialN, { ok: true, partial: true, text: "again", now: NOW + i * 3 * H });
+}
+const lastPartialAt = NOW + (AUTO_MAX_FAILS - 1) * 3 * H;
+assert.equal(partialN.partialStreak, AUTO_MAX_FAILS);
+assert.equal(shouldRunAuto({ ...base, now: lastPartialAt + 3 * H, auto: partialN }).reason, "backoff");
+assert.equal(shouldRunAuto({ ...base, now: lastPartialAt + 21 * H, auto: partialN }).run, true);
+// A complete scrape clears the partial streak and defers the next run a full interval.
+const complete = recordAttempt(partialN, { ok: true, text: "fine", now: lastPartialAt + 21 * H });
+assert.equal(complete.partialStreak, 0);
+assert.equal(complete.lastSuccessAt, lastPartialAt + 21 * H);
+assert.equal(shouldRunAuto({ ...base, now: lastPartialAt + 40 * H, auto: complete }).reason, "fresh");
+
+// Skipped cheap checks are recorded so "never ran" can be told from "ran and skipped".
+const checked = recordCheck(st, { now: NOW + 3 * H, reason: "fresh" });
+assert.equal(checked.lastCheckAt, NOW + 3 * H);
+assert.equal(checked.lastSkipReason, "fresh");
+assert.equal(checked.lastSuccessAt, st.lastSuccessAt, "recording a check keeps the rest of the state");
+assert.deepEqual(checked.lastResult, st.lastResult);
+const ranAfterCheck = recordAttempt(checked, { ok: true, text: "fine", now: NOW + 25 * H });
+assert.equal(ranAfterCheck.lastSkipReason, null, "a real run clears the last skip reason");
+assert.equal(ranAfterCheck.lastCheckAt, NOW + 25 * H);
+
+// When the next run is due, by the same rules as shouldRunAuto.
+assert.equal(nextDueAt({ ...base, auto: null }), NOW, "never ran -> due now");
+assert.equal(nextDueAt({ ...base, hasSecret: false, auto: null }), null);
+assert.equal(nextDueAt({ ...base, enabled: false, auto: null }), null);
+assert.equal(
+  nextDueAt({ ...base, auto: { lastSuccessAt: NOW - 5 * H, lastAttemptAt: NOW - 5 * H } }),
+  NOW - 5 * H + AUTO_MIN_INTERVAL_MS,
+);
+assert.equal(
+  nextDueAt({ ...base, auto: { lastAttemptAt: NOW - 30 * 60000, failedStreak: 1 } }),
+  NOW - 30 * 60000 + AUTO_RETRY_MS,
+);
+// nextDueAt and shouldRunAuto never disagree.
+for (const auto of [
+  null,
+  { lastSuccessAt: NOW - 19 * H, lastAttemptAt: NOW - 19 * H },
+  { lastSuccessAt: NOW - 25 * H, lastAttemptAt: NOW - 30 * 60000, failedStreak: 1 },
+  { lastSuccessAt: NOW - 25 * H, lastAttemptAt: NOW - 5 * H, failedStreak: AUTO_MAX_FAILS },
+  partial1,
+]) {
+  for (const offset of [-H, -60000, 0, 60000, H, 25 * H]) {
+    const now = nextDueAt({ ...base, auto }) + offset;
+    const due = nextDueAt({ enabled: true, hasSecret: true, now, auto });
+    assert.equal(
+      shouldRunAuto({ enabled: true, hasSecret: true, now, auto }).run,
+      due <= now,
+      `nextDueAt disagrees with shouldRunAuto at offset ${offset}`,
+    );
+  }
+}
+
+// The popup line says when the next sync is due and why a run was skipped.
+const freshState = { lastSuccessAt: NOW - 6 * H, lastAttemptAt: NOW - 6 * H, lastResult: { ok: true, text: "fine", at: NOW - 6 * H } };
+const freshText = describeAutoStatus({ enabled: true, hasSecret: true, auto: freshState, now: NOW });
+const dueClock = new Date(NOW + 14 * H).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+assert.match(freshText, /Next sync due/);
+assert.ok(freshText.includes(dueClock), `expected the due clock time ${dueClock} in:\n${freshText}`);
+assert.match(freshText, /still recent/, "says why it is being skipped");
+assert.match(freshText, /Last full sync 6 h ago/, "says when the last successful sync was");
+
+const dueText = describeAutoStatus({ enabled: true, hasSecret: true, auto: null, now: NOW });
+assert.match(dueText, /due now/i);
+assert.match(dueText, /within the hour/);
+assert.match(dueText, /has not run yet/);
+
+const noSecretText = describeAutoStatus({ enabled: true, hasSecret: false, auto: null, now: NOW });
+assert.match(noSecretText, /no sync secret/i);
+assert.ok(!/Next sync due about/.test(noSecretText), "nothing is scheduled without a secret");
+
+const offText = describeAutoStatus({ enabled: false, hasSecret: true, auto: freshState, now: NOW });
+assert.match(offText, /auto-sync is off/i);
+
+const runningText = describeAutoStatus({ enabled: true, hasSecret: true, auto: freshState, lockAt: NOW - 60000, now: NOW });
+assert.match(runningText, /Running now/);
+
+// "Ran and was skipped" is distinguishable from "never ran".
+const skippedState = recordCheck(
+  { lastAttemptAt: NOW - 3 * H, failedStreak: 1, lastResult: { ok: false, text: "Timed out", at: NOW - 3 * H } },
+  { now: NOW - 5 * 60000, reason: "backoff" },
+);
+const skippedText = describeAutoStatus({ enabled: true, hasSecret: true, auto: skippedState, now: NOW });
+assert.match(skippedText, /No full sync yet/);
+assert.match(skippedText, /Last run 3 h ago \(failed\): Timed out/);
+assert.match(skippedText, /Last check 5 min ago: skipped \(waiting after the last attempt\)/);
 
 // popup text
 assert.equal(describeLastRun(null), "Auto-sync has not run yet.");
@@ -80,7 +197,7 @@ assert.equal(describeDoneStep(null), "Done step did not run");
 
 // wiring in the extension
 const manifest = JSON.parse(ext("manifest.json"));
-assert.equal(manifest.version, "1.5.0");
+assert.equal(manifest.version, "1.5.1");
 assert.deepEqual(manifest.permissions, ["storage", "tabs", "scripting", "alarms"]);
 const bg = ext("background.js");
 assert.match(bg, /chrome\.alarms\.create\(AUTO_ALARM, \{ delayInMinutes: 5, periodInMinutes: 60 \}\)/);
@@ -88,8 +205,22 @@ assert.match(bg, /onStartup/, "catch-up on browser startup");
 assert.match(bg, /performWatchLaterSync\(\{ background: true \}\)/, "unattended scrape uses an inactive tab");
 assert.match(bg, /active: !background/);
 assert.equal((bg.match(/runAuto\(/g) || []).length >= 4, true);
+// A run reports whether the scrape was complete, so a partial one is retried sooner.
+assert.match(bg, /partial = result\.partial === true/);
+assert.match(bg, /recordAttempt\(latest\[AUTO_STATE_KEY\], \{ ok, partial,/);
+// Every skipped check is recorded, including the unattended ones.
+assert.match(bg, /recordCheck\(stored\[AUTO_STATE_KEY\], \{ now, reason: decision\.reason \}\)/);
+// Waiting for a tab must not miss a load that already finished, and a reused
+// Watch Later tab is reloaded so the scrape never reads a stale ytInitialData.
+assert.equal(/function waitForComplete\(/.test(bg), false, "one tab-wait helper, not two");
+assert.match(bg, /chrome\.tabs\.reload\(existing\.id\)/, "a reused Watch Later tab is reloaded");
+assert.match(bg, /fresh: true/, "after a reload, wait for the next completion");
+assert.match(bg, /tab\.discarded !== true/, "a sleeping tab never fires 'complete'");
 assert.match(ext("popup.html"), /Auto-sync daily/);
 assert.match(ext("popup.html"), /id="autoRun"/);
-assert.match(ext("popup.js"), /AUTO_RUN_NOW/);
+const popup = ext("popup.js");
+assert.match(popup, /AUTO_RUN_NOW/);
+assert.match(popup, /describeAutoStatus/, "the popup shows the scheduling status, not just the last run");
+assert.match(popup, /hasSecret/);
 
-console.log("auto-sync tests: 20 h catch-up, fresh/disabled/no-secret/running, force, 2 h + 20 h failure backoff, clock skew, state folding, popup text, alarm/startup wiring ok");
+console.log("auto-sync tests: 20 h catch-up, fresh/disabled/no-secret/running, force, 2 h + 20 h failure backoff, partial-not-success + partial streak cap, skip-reason records, nextDueAt agrees with shouldRunAuto, clock skew, state folding, popup status text, alarm/startup/tab-reload wiring ok");
