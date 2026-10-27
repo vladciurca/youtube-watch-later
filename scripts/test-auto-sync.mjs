@@ -11,12 +11,17 @@ import {
   describeAutoStatus,
   describeDoneStep,
   describeLastRun,
+  describeSkippedManual,
+  describeSyncFailure,
   describeSyncResult,
+  hasSyncSecret,
   isAutoDoneEnabled,
   isAutoEnabled,
   nextDueAt,
   recordAttempt,
   recordCheck,
+  recordRunStart,
+  recoverInterruptedState,
   shouldRunAuto,
 } from "../extension/auto-sync.js";
 
@@ -191,13 +196,74 @@ assert.equal(describeLastRun(null), "Auto-sync has not run yet.");
 assert.match(describeLastRun(st, NOW + 2 * H + 5 * 60000), /Last run 5 min ago \(ok\): fine/);
 assert.match(describeLastRun(failAfterOk, NOW + 30 * H), /\(failed\)/);
 assert.equal(describeSyncResult({ scraped: 700, dropped: 3 }), "scraped 700, 3 marked Dropped");
-assert.match(describeSyncResult({ scraped: 40, partial: true }), /looked incomplete/);
+assert.match(describeSyncResult({ scraped: 40, partial: true }), /incomplete scrape \(40 videos\)/);
+assert.match(describeSyncResult({ scraped: 40, partial: true }), /does not count as a full sync/);
+
+// Every way a run can miss an accepted POST has its own sentence.
+assert.equal(hasSyncSecret(undefined), false);
+assert.equal(hasSyncSecret("   "), false);
+assert.equal(hasSyncSecret("secret"), true);
+const unauthorized = new Error("Unauthorized");
+unauthorized.status = 401;
+assert.match(describeSyncFailure(unauthorized), /rejected the sync secret \(401\)/);
+assert.match(describeSyncFailure(unauthorized), /Nothing was uploaded/);
+assert.equal(
+  describeSyncFailure(new Error(describeSyncFailure(unauthorized))),
+  describeSyncFailure(unauthorized),
+  "formatting a failure twice must not nest the sentence",
+);
+const forbidden = new Error("nope");
+forbidden.status = 403;
+assert.match(describeSyncFailure(forbidden), /rejected the sync secret \(403\)/);
+assert.match(describeSyncFailure(new TypeError("Failed to fetch")), /Network error talking to the library/);
+assert.match(
+  describeSyncFailure(new Error("No Watch Later videos were scraped.")),
+  /Scrape returned zero videos/,
+);
+assert.match(
+  describeSyncFailure(new Error("Watch Later load timed out")),
+  /Timed out waiting for the Watch Later tab/,
+);
+assert.match(
+  describeSyncFailure(new Error("Could not establish connection. Receiving end does not exist.")),
+  /Run never started/,
+);
+assert.match(describeSkippedManual("no_secret"), /No sync secret is saved, so Run now did not start/);
+assert.match(describeSkippedManual("running"), /did not start: another sync is already marked in progress/);
+
+const started = recordRunStart(
+  { lastSuccessAt: NOW - 30 * H },
+  { now: NOW, trigger: "manual" },
+);
+assert.equal(started.lastResult.pending, true);
+assert.equal(started.failedStreak ?? 0, 0, "a start is not a failed attempt");
+assert.equal(started.lastSuccessAt, NOW - 30 * H);
+assert.match(describeLastRun(started, NOW), /has not reported a result yet/);
+const orphan = recoverInterruptedState(started, NOW - 1000, NOW + 5000);
+assert.match(orphan.lastResult.text, /Run never finished/);
+assert.equal(orphan.lastResult.pending, undefined);
+assert.equal(orphan.failedStreak, 1);
+assert.equal(orphan.lastSuccessAt, NOW - 30 * H, "a killed run keeps the last full sync");
+assert.equal(recoverInterruptedState({ lastResult: { ok: true, text: "fine" } }, null, NOW), null);
+const failedVisible = describeAutoStatus({
+  enabled: true,
+  hasSecret: true,
+  now: NOW,
+  auto: recordAttempt(null, {
+    ok: false,
+    text: describeSyncFailure(unauthorized),
+    now: NOW - 60000,
+    trigger: "manual",
+  }),
+});
+assert.match(failedVisible, /rejected the sync secret \(401\)/);
+assert.match(failedVisible, /\(failed\)/);
 assert.equal(describeDoneStep({ ok: ["a", "b"], skipped: [1], failed: [] }), "Done step: 2 marked watched, 1 skipped");
 assert.equal(describeDoneStep(null), "Done step did not run");
 
 // wiring in the extension
 const manifest = JSON.parse(ext("manifest.json"));
-assert.equal(manifest.version, "1.5.1");
+assert.equal(manifest.version, "1.5.2");
 assert.deepEqual(manifest.permissions, ["storage", "tabs", "scripting", "alarms"]);
 const bg = ext("background.js");
 assert.match(bg, /chrome\.alarms\.create\(AUTO_ALARM, \{ delayInMinutes: 5, periodInMinutes: 60 \}\)/);
@@ -210,6 +276,17 @@ assert.match(bg, /partial = result\.partial === true/);
 assert.match(bg, /recordAttempt\(latest\[AUTO_STATE_KEY\], \{ ok, partial,/);
 // Every skipped check is recorded, including the unattended ones.
 assert.match(bg, /recordCheck\(stored\[AUTO_STATE_KEY\], \{ now, reason: decision\.reason \}\)/);
+assert.match(bg, /describeSyncFailure/);
+assert.match(bg, /describeSkippedManual\(decision\.reason\)/);
+assert.match(bg, /recordRunStart/);
+assert.match(bg, /recoverInterruptedState/);
+assert.match(bg, /hasSyncSecret\(stored\.syncSecret\)/);
+assert.match(bg, /await booted/);
+assert.match(bg, /runAuto\("manual", \{ force: true \}\)/);
+assert.match(bg, /AUTO_RUN_NOW"\) return undefined;[\s\S]*return true;/);
+assert.match(ext("popup.js"), /describeSyncFailure/);
+assert.match(ext("popup.js"), /Run never started/);
+assert.match(ext("popup.js"), /syncSecret\.value\.trim\(\)/);
 // Waiting for a tab must not miss a load that already finished, and a reused
 // Watch Later tab is reloaded so the scrape never reads a stale ytInitialData.
 assert.equal(/function waitForComplete\(/.test(bg), false, "one tab-wait helper, not two");

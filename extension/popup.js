@@ -1,8 +1,11 @@
 import {
   AUTO_STALE_LOCK_MS,
   describeAutoStatus,
+  describeSyncFailure,
+  hasSyncSecret,
   isAutoDoneEnabled,
   isAutoEnabled,
+  recordAttempt,
 } from "./auto-sync.js";
 import { reasonLabel, summarizeJob } from "./done-sync.js";
 
@@ -38,7 +41,7 @@ if (resetPending) {
 async function persist() {
   await chrome.storage.local.set({
     apiUrl: apiUrl.value.trim() || DEFAULT_API,
-    syncSecret: syncSecret.value,
+    syncSecret: syncSecret.value.trim(),
   });
 }
 
@@ -222,10 +225,12 @@ async function renderAuto() {
   const running = !!stored[AUTO_LOCK_KEY] && Date.now() - stored[AUTO_LOCK_KEY] < AUTO_STALE_LOCK_MS;
   autoRun.disabled = running;
   autoStatus.style.whiteSpace = "pre-line";
+  const lastResult = stored[AUTO_STATE_KEY]?.lastResult;
+  autoStatus.classList.toggle("is-error", !!lastResult && lastResult.ok === false && !lastResult.pending);
   autoStatus.textContent = describeAutoStatus({
     enabled: autoEnabled.checked,
     // Only whether a secret exists, never its value.
-    hasSecret: !!(stored.syncSecret || syncSecret.value),
+    hasSecret: hasSyncSecret(stored.syncSecret || syncSecret.value),
     auto: stored[AUTO_STATE_KEY],
     lockAt: stored[AUTO_LOCK_KEY],
   });
@@ -241,8 +246,31 @@ autoDone.addEventListener("change", async () => {
 autoRun.addEventListener("click", async () => {
   await persist();
   autoRun.disabled = true;
-  await chrome.runtime.sendMessage({ type: "AUTO_RUN_NOW" });
-  setTimeout(() => void renderAuto(), 500);
+  setStatus("Starting Run now…");
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "AUTO_RUN_NOW" });
+    if (!result) {
+      throw new Error("Run never started");
+    }
+    if (result.ok === false) {
+      setStatus(result.text || result.error || "Run now failed before the library accepted it.", "error");
+    } else if (result.text) {
+      setStatus(result.text, result.partial ? "error" : "ok");
+    }
+  } catch (error) {
+    const text = describeSyncFailure(error);
+    const current = await chrome.storage.local.get([AUTO_STATE_KEY]);
+    await chrome.storage.local.set({
+      [AUTO_STATE_KEY]: recordAttempt(current[AUTO_STATE_KEY], {
+        ok: false,
+        text,
+        now: Date.now(),
+        trigger: "manual",
+      }),
+    });
+    setStatus(text, "error");
+  }
+  await renderAuto();
 });
 chrome.storage.onChanged.addListener((changes, area) => {
   if (

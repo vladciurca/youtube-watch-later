@@ -1,11 +1,16 @@
 import {
   AUTO_DONE_CAP,
   describeDoneStep,
+  describeSkippedManual,
+  describeSyncFailure,
   describeSyncResult,
+  hasSyncSecret,
   isAutoDoneEnabled,
   isAutoEnabled,
   recordAttempt,
   recordCheck,
+  recordRunStart,
+  recoverInterruptedState,
   shouldRunAuto,
 } from "./auto-sync.js";
 import {
@@ -22,7 +27,7 @@ async function getSettings() {
   const stored = await chrome.storage.local.get(["apiUrl", "syncSecret"]);
   return {
     apiUrl: (stored.apiUrl || DEFAULT_API).replace(/\/$/, ""),
-    syncSecret: stored.syncSecret || "",
+    syncSecret: hasSyncSecret(stored.syncSecret) ? stored.syncSecret.trim() : "",
   };
 }
 
@@ -162,22 +167,28 @@ async function postSync(apiUrl, syncSecret, videos, resetDropped, statedCountVal
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload.error || `Sync failed (${response.status})`);
+    const error = new Error(payload.error || `Sync failed (${response.status})`);
+    error.status = response.status;
+    throw error;
   }
   return payload;
 }
 
 // The normal scrape + upload. `background` is used by unattended runs.
 async function performWatchLaterSync({ background = false } = {}) {
-  const { apiUrl, syncSecret } = await getSettings();
-  if (!syncSecret) {
-    throw new Error("Set the sync secret in this popup (same value as Vercel SYNC_SECRET).");
-  }
-  const [{ tabId, created }, expectedCount] = await Promise.all([
-    findOrOpenWatchLater({ background }),
-    previousOnListCount(apiUrl),
-  ]);
+  let tabId = null;
+  let created = false;
   try {
+    const { apiUrl, syncSecret } = await getSettings();
+    if (!syncSecret) {
+      throw new Error("Set the sync secret in this popup (same value as Vercel SYNC_SECRET).");
+    }
+    const [opened, expectedCount] = await Promise.all([
+      findOrOpenWatchLater({ background }),
+      previousOnListCount(apiUrl),
+    ]);
+    tabId = opened.tabId;
+    created = opened.created;
     const scraped = await scrapeTab(tabId, expectedCount);
     if (!scraped?.videos?.length) {
       throw new Error("No Watch Later videos were scraped.");
@@ -206,12 +217,12 @@ async function performWatchLaterSync({ background = false } = {}) {
     const message = error instanceof Error ? error.message : String(error);
     if (/consent\.youtube|accounts\.google|Cannot access contents|signin/i.test(message)) {
       throw new Error(
-        "YouTube is not signed in (or is showing a consent page) in this browser, so Watch Later could not be read.",
+        "YouTube is not signed in (or is showing a consent page) in this browser, so Watch Later could not be read. Nothing was uploaded.",
       );
     }
-    throw error;
+    throw new Error(describeSyncFailure(error));
   } finally {
-    if (background && created) {
+    if (background && created && tabId != null) {
       try {
         await chrome.tabs.remove(tabId);
       } catch {
@@ -247,17 +258,6 @@ const DEFAULT_WATCH_BASE = "https://www.youtube.com/watch";
 let jobActive = false;
 let cancelRequested = false;
 let currentWindowId = null;
-
-// A service worker restart kills a running job; never leave it looking alive.
-(async () => {
-  const stored = await chrome.storage.local.get([JOB_KEY]);
-  const job = stored[JOB_KEY];
-  if (job?.state === "running") {
-    await chrome.storage.local.set({
-      [JOB_KEY]: { ...job, state: "interrupted", current: null, finishedAt: Date.now() },
-    });
-  }
-})();
 
 async function fetchJson(url) {
   const response = await fetch(url, { cache: "no-store" });
@@ -480,6 +480,25 @@ const AUTO_LOCK_KEY = "autoSyncLockAt";
 const AUTO_ENABLED_KEY = "autoSyncEnabled";
 const AUTO_DONE_KEY = "autoDoneEnabled";
 
+// A service worker restart kills in-flight work. A Done job must not stay
+// "running", and an auto-sync lock (or a start with no result) means the run
+// died before the library accepted a POST. Record that, or the popup keeps
+// showing the previous line and Run now looks like it never happened.
+const booted = (async () => {
+  const stored = await chrome.storage.local.get([JOB_KEY, AUTO_STATE_KEY, AUTO_LOCK_KEY]);
+  const job = stored[JOB_KEY];
+  if (job?.state === "running") {
+    await chrome.storage.local.set({
+      [JOB_KEY]: { ...job, state: "interrupted", current: null, finishedAt: Date.now() },
+    });
+  }
+  const recovered = recoverInterruptedState(stored[AUTO_STATE_KEY], stored[AUTO_LOCK_KEY], Date.now());
+  if (recovered) {
+    await chrome.storage.local.set({ [AUTO_STATE_KEY]: recovered });
+    await chrome.storage.local.remove([AUTO_LOCK_KEY]);
+  }
+})();
+
 async function ensureAlarms() {
   const existing = await chrome.alarms.get(AUTO_ALARM);
   if (!existing) {
@@ -489,76 +508,86 @@ async function ensureAlarms() {
 }
 
 async function runAuto(trigger, { force = false } = {}) {
-  const stored = await chrome.storage.local.get([
-    AUTO_STATE_KEY,
-    AUTO_LOCK_KEY,
-    AUTO_ENABLED_KEY,
-    AUTO_DONE_KEY,
-    "syncSecret",
-  ]);
-  const now = Date.now();
-  const decision = shouldRunAuto({
-    enabled: isAutoEnabled(stored[AUTO_ENABLED_KEY]),
-    now,
-    auto: stored[AUTO_STATE_KEY],
-    lockAt: stored[AUTO_LOCK_KEY],
-    hasSecret: !!stored.syncSecret,
-    force,
-  });
-  if (!decision.run) {
-    // Even a cheap skipped check is written down, so the popup can say why
-    // nothing ran instead of looking like auto-sync never started.
-    let state = recordCheck(stored[AUTO_STATE_KEY], { now, reason: decision.reason });
-    if (decision.reason === "no_secret" && (force || trigger === "manual")) {
-      state = recordAttempt(state, {
-        ok: false,
-        text: "Set the sync secret in this popup first.",
-        now,
-        trigger,
-      });
-    }
-    await chrome.storage.local.set({ [AUTO_STATE_KEY]: state });
-    return { ok: false, skipped: decision.reason };
-  }
-
-  await chrome.storage.local.set({ [AUTO_LOCK_KEY]: now });
+  // Extension API calls keep the worker alive after the popup closes. Start
+  // this before the first await so a Run now cannot die as "never started".
   const keepAlive = setInterval(() => void chrome.runtime.getPlatformInfo(), 20000);
-  let ok = false;
-  let partial = false;
-  let text = "";
   try {
-    const result = await performWatchLaterSync({ background: true });
-    ok = true;
-    // An incomplete scrape uploaded fine but did not read the whole playlist,
-    // so it is retried on the short backoff instead of 20 h later.
-    partial = result.partial === true;
-    text = `Sync: ${describeSyncResult(result)}`;
-    if (isAutoDoneEnabled(stored[AUTO_DONE_KEY])) {
-      if (jobActive) {
-        text += ". Done step skipped: another Done sync is running";
-      } else {
-        try {
-          jobActive = true;
-          cancelRequested = false;
-          const job = await runDoneSync({ maxVideos: AUTO_DONE_CAP });
-          text += `. ${describeDoneStep(job)}`;
-        } catch (error) {
-          jobActive = false;
-          text += `. Done step failed: ${error instanceof Error ? error.message : String(error)}`;
+    await booted;
+    const stored = await chrome.storage.local.get([
+      AUTO_STATE_KEY,
+      AUTO_LOCK_KEY,
+      AUTO_ENABLED_KEY,
+      AUTO_DONE_KEY,
+      "syncSecret",
+    ]);
+    const now = Date.now();
+    const decision = shouldRunAuto({
+      enabled: isAutoEnabled(stored[AUTO_ENABLED_KEY]),
+      now,
+      auto: stored[AUTO_STATE_KEY],
+      lockAt: stored[AUTO_LOCK_KEY],
+      hasSecret: hasSyncSecret(stored.syncSecret),
+      force,
+    });
+    if (!decision.run) {
+      // Even a cheap skipped check is written down, so the popup can say why
+      // nothing ran instead of looking like auto-sync never started.
+      // A live run already holds the lock: do not overwrite its result with
+      // "did not start", or the click races the run that is about to finish.
+      let state = recordCheck(stored[AUTO_STATE_KEY], { now, reason: decision.reason });
+      let text = "";
+      if ((force || trigger === "manual") && decision.reason !== "running") {
+        text = describeSkippedManual(decision.reason);
+        state = recordAttempt(state, { ok: false, text, now, trigger });
+      } else if (decision.reason === "running") {
+        text = describeSkippedManual("running");
+      }
+      await chrome.storage.local.set({ [AUTO_STATE_KEY]: state });
+      return { ok: false, skipped: decision.reason, text };
+    }
+
+    await chrome.storage.local.set({
+      [AUTO_LOCK_KEY]: now,
+      [AUTO_STATE_KEY]: recordRunStart(stored[AUTO_STATE_KEY], { now, trigger }),
+    });
+    let ok = false;
+    let partial = false;
+    let text = "";
+    try {
+      const result = await performWatchLaterSync({ background: true });
+      ok = true;
+      // An incomplete scrape uploaded fine but did not read the whole playlist,
+      // so it is retried on the short backoff instead of 20 h later.
+      partial = result.partial === true;
+      text = `Sync: ${describeSyncResult(result)}`;
+      if (isAutoDoneEnabled(stored[AUTO_DONE_KEY])) {
+        if (jobActive) {
+          text += ". Done step skipped: another Done sync is running";
+        } else {
+          try {
+            jobActive = true;
+            cancelRequested = false;
+            const job = await runDoneSync({ maxVideos: AUTO_DONE_CAP });
+            text += `. ${describeDoneStep(job)}`;
+          } catch (error) {
+            jobActive = false;
+            text += `. Done step failed: ${describeSyncFailure(error)}`;
+          }
         }
       }
+    } catch (error) {
+      text = describeSyncFailure(error);
+    } finally {
+      const latest = await chrome.storage.local.get([AUTO_STATE_KEY]);
+      await chrome.storage.local.set({
+        [AUTO_STATE_KEY]: recordAttempt(latest[AUTO_STATE_KEY], { ok, partial, text, now: Date.now(), trigger }),
+      });
+      await chrome.storage.local.remove([AUTO_LOCK_KEY]);
     }
-  } catch (error) {
-    text = error instanceof Error ? error.message : String(error);
+    return { ok, partial, text };
   } finally {
     clearInterval(keepAlive);
-    const latest = await chrome.storage.local.get([AUTO_STATE_KEY]);
-    await chrome.storage.local.set({
-      [AUTO_STATE_KEY]: recordAttempt(latest[AUTO_STATE_KEY], { ok, partial, text, now: Date.now(), trigger }),
-    });
-    await chrome.storage.local.remove([AUTO_LOCK_KEY]);
   }
-  return { ok, partial, text };
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -579,12 +608,26 @@ chrome.runtime.onStartup.addListener(() => {
 
 void ensureAlarms();
 
-// The lock expires on its own (AUTO_STALE_LOCK_MS) if a worker is killed mid-run.
-
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type !== "AUTO_RUN_NOW") return undefined;
-  // Starts in the background; the popup follows progress through storage.
-  void runAuto("manual", { force: true });
-  sendResponse({ ok: true });
-  return undefined;
+  // Stay alive until the run records a result. Returning true keeps the
+  // message channel open, which is what stops Arc from suspending the worker
+  // the moment the popup's listener returns.
+  runAuto("manual", { force: true })
+    .then((result) => {
+      try {
+        sendResponse(result);
+      } catch {
+        // The popup was closed; the result is already in storage.
+      }
+    })
+    .catch((error) => {
+      const text = describeSyncFailure(error);
+      try {
+        sendResponse({ ok: false, error: text, text });
+      } catch {
+        // popup closed
+      }
+    });
+  return true;
 });
