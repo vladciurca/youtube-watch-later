@@ -26,6 +26,20 @@
       <button id="sync" type="button">Sync Watch Later</button>
       <p id="status" role="status"></p>
 
+      <section class="auto-sync" aria-labelledby="auto-sync-title">
+        <h2 id="auto-sync-title">Automatic sync</h2>
+        <label class="check">
+          <input id="autoEnabled" type="checkbox" />
+          <span>Auto-sync daily while the browser is open</span>
+        </label>
+        <label class="check">
+          <input id="autoDone" type="checkbox" />
+          <span>Also mark Done videos watched (opens a small window, at most 5 per run)</span>
+        </label>
+        <button id="autoRun" type="button" class="secondary">Run now</button>
+        <p id="autoStatus" class="lede"></p>
+      </section>
+
       <section class="done-sync" aria-labelledby="done-sync-title">
         <h2 id="done-sync-title">Sync Done to YouTube</h2>
         <p class="lede">

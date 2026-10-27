@@ -1,4 +1,13 @@
 import {
+  AUTO_DONE_CAP,
+  describeDoneStep,
+  describeSyncResult,
+  isAutoDoneEnabled,
+  isAutoEnabled,
+  recordAttempt,
+  shouldRunAuto,
+} from "./auto-sync.js";
+import {
   finishJob,
   initialJob,
   recordResult,
@@ -48,24 +57,26 @@ function waitForComplete(tabId) {
   });
 }
 
-async function findOrOpenWatchLater() {
+// background = unattended run: reuse an open Watch Later tab without focusing it,
+// or open one inactive. `created` tells the caller to close it afterwards.
+async function findOrOpenWatchLater({ background = false } = {}) {
   const tabs = await chrome.tabs.query({
     url: ["https://www.youtube.com/playlist*", "https://youtube.com/playlist*"],
   });
   const existing = tabs.find(isWatchLaterTab);
   if (existing?.id != null) {
-    await chrome.tabs.update(existing.id, { active: true });
+    if (!background) await chrome.tabs.update(existing.id, { active: true });
     if (existing.status !== "complete") {
       await waitForComplete(existing.id);
     }
-    return existing.id;
+    return { tabId: existing.id, created: false };
   }
 
-  const created = await chrome.tabs.create({ url: WL_URL, active: true });
+  const created = await chrome.tabs.create({ url: WL_URL, active: !background });
   if (created.id == null) throw new Error("Could not open Watch Later");
   await waitForComplete(created.id);
   await new Promise((resolve) => setTimeout(resolve, 1500));
-  return created.id;
+  return { tabId: created.id, created: true };
 }
 
 async function previousOnListCount(apiUrl) {
@@ -134,18 +145,17 @@ async function postSync(apiUrl, syncSecret, videos, resetDropped, statedCountVal
   return payload;
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== "SYNC_WATCH_LATER") return undefined;
-
-  (async () => {
-    const { apiUrl, syncSecret } = await getSettings();
-    if (!syncSecret) {
-      throw new Error("Set the sync secret in this popup (same value as Vercel SYNC_SECRET).");
-    }
-    const [tabId, expectedCount] = await Promise.all([
-      findOrOpenWatchLater(),
-      previousOnListCount(apiUrl),
-    ]);
+// The normal scrape + upload. `background` is used by unattended runs.
+async function performWatchLaterSync({ background = false } = {}) {
+  const { apiUrl, syncSecret } = await getSettings();
+  if (!syncSecret) {
+    throw new Error("Set the sync secret in this popup (same value as Vercel SYNC_SECRET).");
+  }
+  const [{ tabId, created }, expectedCount] = await Promise.all([
+    findOrOpenWatchLater({ background }),
+    previousOnListCount(apiUrl),
+  ]);
+  try {
     const scraped = await scrapeTab(tabId, expectedCount);
     if (!scraped?.videos?.length) {
       throw new Error("No Watch Later videos were scraped.");
@@ -170,7 +180,29 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       resetDropped: result.resetDropped === true,
       clearedDropped: result.clearedDropped ?? 0,
     };
-  })()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/consent\.youtube|accounts\.google|Cannot access contents|signin/i.test(message)) {
+      throw new Error(
+        "YouTube is not signed in (or is showing a consent page) in this browser, so Watch Later could not be read.",
+      );
+    }
+    throw error;
+  } finally {
+    if (background && created) {
+      try {
+        await chrome.tabs.remove(tabId);
+      } catch {
+        // already closed
+      }
+    }
+  }
+}
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type !== "SYNC_WATCH_LATER") return undefined;
+
+  performWatchLaterSync()
     .then(sendResponse)
     .catch((error) => {
       sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
@@ -333,7 +365,7 @@ async function saveJob(job) {
   await chrome.storage.local.set({ [JOB_KEY]: job });
 }
 
-async function runDoneSync() {
+async function runDoneSync({ maxVideos = Infinity } = {}) {
   const { apiUrl } = await getSettings();
   const stored = await chrome.storage.local.get(["watchBase"]);
   const watchBase = stored.watchBase || DEFAULT_WATCH_BASE;
@@ -343,12 +375,14 @@ async function runDoneSync() {
     fetchJson(`${apiUrl}/api/library`),
     chrome.storage.local.get([SYNCED_KEY, SKIPPED_KEY]),
   ]);
-  const { toSync } = selectDoneToSync({
+  const { toSync: allToSync } = selectDoneToSync({
     doneItems: done.items ?? [],
     videos: library.videos ?? [],
     synced: state[SYNCED_KEY] ?? {},
     skipped: state[SKIPPED_KEY] ?? {},
   });
+  // Unattended runs cap how many videos they touch; the rest wait for the next run.
+  const toSync = allToSync.slice(0, maxVideos);
 
   let job = initialJob(toSync);
   await saveJob(job);
@@ -385,6 +419,7 @@ async function runDoneSync() {
     jobActive = false;
     cancelRequested = false;
   }
+  return job;
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -431,4 +466,121 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
     });
   return true;
+});
+
+// ---------------------------------------------------------------------------
+// Automatic daily sync. An hourly alarm checks whether a successful run is more
+// than ~20 h old; a startup alarm catches up after the browser was closed.
+// Every run: (1) the normal scrape + upload in an inactive tab, (2) optionally,
+// only if the user switched it on, the capped Done-to-YouTube step.
+// ---------------------------------------------------------------------------
+
+const AUTO_ALARM = "autoSyncCheck";
+const AUTO_STARTUP_ALARM = "autoSyncStartup";
+const AUTO_STATE_KEY = "autoSync";
+const AUTO_LOCK_KEY = "autoSyncLockAt";
+const AUTO_ENABLED_KEY = "autoSyncEnabled";
+const AUTO_DONE_KEY = "autoDoneEnabled";
+
+async function ensureAlarms() {
+  const existing = await chrome.alarms.get(AUTO_ALARM);
+  if (!existing) {
+    // Alarms may be dropped when the browser restarts, so this runs on every worker start.
+    chrome.alarms.create(AUTO_ALARM, { delayInMinutes: 5, periodInMinutes: 60 });
+  }
+}
+
+async function runAuto(trigger, { force = false } = {}) {
+  const stored = await chrome.storage.local.get([
+    AUTO_STATE_KEY,
+    AUTO_LOCK_KEY,
+    AUTO_ENABLED_KEY,
+    AUTO_DONE_KEY,
+    "syncSecret",
+  ]);
+  const now = Date.now();
+  const decision = shouldRunAuto({
+    enabled: isAutoEnabled(stored[AUTO_ENABLED_KEY]),
+    now,
+    auto: stored[AUTO_STATE_KEY],
+    lockAt: stored[AUTO_LOCK_KEY],
+    hasSecret: !!stored.syncSecret,
+    force,
+  });
+  if (!decision.run) {
+    if (decision.reason === "no_secret" && (force || trigger === "manual")) {
+      await chrome.storage.local.set({
+        [AUTO_STATE_KEY]: recordAttempt(stored[AUTO_STATE_KEY], {
+          ok: false,
+          text: "Set the sync secret in this popup first.",
+          now,
+          trigger,
+        }),
+      });
+    }
+    return { ok: false, skipped: decision.reason };
+  }
+
+  await chrome.storage.local.set({ [AUTO_LOCK_KEY]: now });
+  const keepAlive = setInterval(() => void chrome.runtime.getPlatformInfo(), 20000);
+  let ok = false;
+  let text = "";
+  try {
+    const result = await performWatchLaterSync({ background: true });
+    ok = true;
+    text = `Sync: ${describeSyncResult(result)}`;
+    if (isAutoDoneEnabled(stored[AUTO_DONE_KEY])) {
+      if (jobActive) {
+        text += ". Done step skipped: another Done sync is running";
+      } else {
+        try {
+          jobActive = true;
+          cancelRequested = false;
+          const job = await runDoneSync({ maxVideos: AUTO_DONE_CAP });
+          text += `. ${describeDoneStep(job)}`;
+        } catch (error) {
+          jobActive = false;
+          text += `. Done step failed: ${error instanceof Error ? error.message : String(error)}`;
+        }
+      }
+    }
+  } catch (error) {
+    text = error instanceof Error ? error.message : String(error);
+  } finally {
+    clearInterval(keepAlive);
+    const latest = await chrome.storage.local.get([AUTO_STATE_KEY]);
+    await chrome.storage.local.set({
+      [AUTO_STATE_KEY]: recordAttempt(latest[AUTO_STATE_KEY], { ok, text, now: Date.now(), trigger }),
+    });
+    await chrome.storage.local.remove([AUTO_LOCK_KEY]);
+  }
+  return { ok, text };
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === AUTO_ALARM) void runAuto("daily");
+  if (alarm.name === AUTO_STARTUP_ALARM) void runAuto("startup");
+});
+
+chrome.runtime.onInstalled.addListener(() => {
+  void ensureAlarms();
+  chrome.alarms.create(AUTO_STARTUP_ALARM, { delayInMinutes: 1 });
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  void ensureAlarms();
+  // Catch up shortly after the browser opens if the last good run is over ~20 h old.
+  chrome.alarms.create(AUTO_STARTUP_ALARM, { delayInMinutes: 1 });
+});
+
+void ensureAlarms();
+
+// The lock expires on its own (AUTO_STALE_LOCK_MS) if a worker is killed mid-run.
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type !== "AUTO_RUN_NOW") return undefined;
+  // Starts in the background; the popup follows progress through storage.
+  void runAuto("manual", { force: true });
+  sendResponse({ ok: true });
+  return undefined;
 });

@@ -1,3 +1,4 @@
+import { describeLastRun, isAutoDoneEnabled, isAutoEnabled } from "./auto-sync.js";
 import { reasonLabel, summarizeJob } from "./done-sync.js";
 
 const DEFAULT_API = "https://youtube-watch-later.vercel.app";
@@ -190,3 +191,54 @@ doneRetry.addEventListener("click", async () => {
   await chrome.runtime.sendMessage({ type: "DONE_SYNC_CLEAR_SKIPPED" });
   setStatus("Skipped videos will be included next time. Click Sync Done to YouTube.");
 });
+
+// ---------------------------------------------------------------------------
+// Automatic daily sync (toggle, Run now, last result)
+// ---------------------------------------------------------------------------
+
+const AUTO_STATE_KEY = "autoSync";
+const AUTO_LOCK_KEY = "autoSyncLockAt";
+const autoEnabled = document.getElementById("autoEnabled");
+const autoDone = document.getElementById("autoDone");
+const autoRun = document.getElementById("autoRun");
+const autoStatus = document.getElementById("autoStatus");
+
+async function renderAuto() {
+  const stored = await chrome.storage.local.get([
+    AUTO_STATE_KEY,
+    AUTO_LOCK_KEY,
+    "autoSyncEnabled",
+    "autoDoneEnabled",
+  ]);
+  autoEnabled.checked = isAutoEnabled(stored.autoSyncEnabled);
+  autoDone.checked = isAutoDoneEnabled(stored.autoDoneEnabled);
+  autoDone.disabled = !autoEnabled.checked;
+  const running = !!stored[AUTO_LOCK_KEY] && Date.now() - stored[AUTO_LOCK_KEY] < 20 * 60 * 1000;
+  autoRun.disabled = running;
+  autoStatus.textContent = running
+    ? "Running now… (uses an inactive tab; this can take a minute)"
+    : describeLastRun(stored[AUTO_STATE_KEY]);
+}
+
+autoEnabled.addEventListener("change", async () => {
+  await chrome.storage.local.set({ autoSyncEnabled: autoEnabled.checked });
+  await renderAuto();
+});
+autoDone.addEventListener("change", async () => {
+  await chrome.storage.local.set({ autoDoneEnabled: autoDone.checked });
+});
+autoRun.addEventListener("click", async () => {
+  await persist();
+  autoRun.disabled = true;
+  await chrome.runtime.sendMessage({ type: "AUTO_RUN_NOW" });
+  setTimeout(() => void renderAuto(), 500);
+});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (
+    area === "local" &&
+    (changes[AUTO_STATE_KEY] || changes[AUTO_LOCK_KEY] || changes.autoSyncEnabled || changes.autoDoneEnabled)
+  ) {
+    void renderAuto();
+  }
+});
+await renderAuto();
