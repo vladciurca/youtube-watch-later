@@ -13,6 +13,11 @@ export function isAutoEnabled(value) {
   return value !== false;
 }
 
+/** A secret of only whitespace still cannot authenticate. */
+export function hasSyncSecret(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
 /** The unattended Done step is opt-in. */
 export function isAutoDoneEnabled(value) {
   return value === true;
@@ -142,6 +147,7 @@ export function formatDueTime(at, now = Date.now()) {
 export function describeLastRun(auto, now = Date.now()) {
   const result = auto?.lastResult;
   if (!result) return "Auto-sync has not run yet.";
+  if (result.pending) return "Run started and has not reported a result yet.";
   const outcome = result.ok ? (result.partial ? "incomplete" : "ok") : "failed";
   return `Last run ${formatAgo(now - result.at)} (${outcome}): ${result.text}`;
 }
@@ -200,8 +206,109 @@ export function describeSyncResult(result) {
   const scraped = result?.scraped ?? result?.upserted ?? 0;
   const dropped = result?.dropped ?? 0;
   return result?.partial
-    ? `scraped ${scraped}, looked incomplete so nothing was dropped`
+    ? `incomplete scrape (${scraped} videos) — the library kept previous entries and this does not count as a full sync`
     : `scraped ${scraped}, ${dropped} marked Dropped`;
+}
+
+/**
+ * One specific sentence for a Run now / auto run that never got an accepted
+ * POST. Used by the service worker (stored in lastResult) and the popup.
+ */
+export function describeSyncFailure(error) {
+  const status = Number(error?.status);
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (
+    message.startsWith("The library rejected the sync secret") ||
+    message.startsWith("Network error talking to the library") ||
+    message.startsWith("Scrape returned zero videos") ||
+    message.startsWith("Timed out waiting for the Watch Later tab") ||
+    message.startsWith("Run never started:") ||
+    message.startsWith("No sync secret is saved") ||
+    message.startsWith("Run never finished:") ||
+    message.startsWith("YouTube is not signed in")
+  ) {
+    return message;
+  }
+  const code = status || (/\b403\b/.test(message) ? 403 : /\b401\b/.test(message) ? 401 : 0);
+
+  if (code === 401 || code === 403 || /unauthorized/i.test(message)) {
+    const shown = code === 403 ? 403 : 401;
+    return `The library rejected the sync secret (${shown}). Re-enter the same value as Vercel SYNC_SECRET. Nothing was uploaded.`;
+  }
+  if (
+    /failed to fetch|networkerror|network request failed|load failed|econnreset|enotfound|econnrefused/i.test(
+      message,
+    )
+  ) {
+    return `Network error talking to the library. Nothing was uploaded. (${message})`;
+  }
+  if (/no watch later videos|zero videos|scraped zero/i.test(message)) {
+    return "Scrape returned zero videos, so nothing was uploaded. YouTube may still be loading, or this browser is signed out.";
+  }
+  if (/timed out|timeout/i.test(message)) {
+    return "Timed out waiting for the Watch Later tab to load. Nothing was uploaded.";
+  }
+  if (
+    /receiving end does not exist|could not establish connection|run never started|extension context invalidated/i.test(
+      message,
+    )
+  ) {
+    return "Run never started: the extension background did not respond. Reload Watch Later Sync on the extensions page and try again.";
+  }
+  if (/no sync secret|set the sync secret/i.test(message)) {
+    return "No sync secret is saved, so Run now did not start. Enter it in this popup (same value as Vercel SYNC_SECRET).";
+  }
+  return message || "Sync failed before the library accepted it. Nothing was uploaded.";
+}
+
+/** Why a manual Run now was refused before any scrape started. */
+export function describeSkippedManual(reason) {
+  if (reason === "no_secret") {
+    return "No sync secret is saved, so Run now did not start. Enter it in this popup (same value as Vercel SYNC_SECRET).";
+  }
+  if (reason === "running") {
+    return "Run now did not start: another sync is already marked in progress.";
+  }
+  return `Run now did not start (${skipReasonText(reason)}).`;
+}
+
+/**
+ * Written before the scrape so a worker killed mid-run does not leave the
+ * popup showing the previous result. pending is not a finished attempt.
+ */
+export function recordRunStart(auto, { now, trigger }) {
+  const prev = auto || {};
+  return {
+    ...prev,
+    lastCheckAt: now,
+    lastSkipReason: null,
+    runStartedAt: now,
+    lastResult: {
+      ok: false,
+      partial: false,
+      pending: true,
+      text: "Starting Watch Later sync…",
+      at: now,
+      trigger: trigger || "manual",
+    },
+  };
+}
+
+/**
+ * A service-worker restart found a lock or a start with no result. The run
+ * died before /api/sync could accept it. Returns null when there is nothing
+ * to repair.
+ */
+export function recoverInterruptedState(auto, lockAt, now) {
+  const lock = typeof lockAt === "number" && Number.isFinite(lockAt) && lockAt > 0;
+  const pending = auto?.lastResult?.pending === true;
+  if (!lock && !pending) return null;
+  return recordAttempt(auto, {
+    ok: false,
+    text: "Run never finished: the browser stopped the extension before the library accepted the sync. Nothing was uploaded.",
+    now,
+    trigger: auto?.lastResult?.trigger || "manual",
+  });
 }
 
 /** Text for the optional Done step, from the finished job. */

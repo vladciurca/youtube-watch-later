@@ -161,3 +161,7 @@ label.check input {
 #autoStatus {
   white-space: pre-line;
 }
+
+#autoStatus.is-error {
+  color: #f0a43a;
+}

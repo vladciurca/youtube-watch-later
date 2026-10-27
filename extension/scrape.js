@@ -55,6 +55,24 @@
     return parts[0];
   }
 
+  // Badge text is sometimes absent and the length lives only in an
+  // accessibility label: "1 hour, 34 minutes, 39 seconds" or "12:05".
+  function durationFromAccessibilityLabel(label) {
+    if (typeof label !== "string") return "";
+    const clock = label.match(/\b(\d{1,2}:\d{2}(?::\d{2})?)\b/);
+    if (clock) return clock[1];
+    const hours = label.match(/(\d+)\s*hours?/i);
+    const minutes = label.match(/(\d+)\s*minutes?/i);
+    const seconds = label.match(/(\d+)\s*seconds?/i);
+    if (!hours && !minutes && !seconds) return "";
+    const hh = hours ? Number(hours[1]) : 0;
+    const mm = minutes ? Number(minutes[1]) : 0;
+    const ss = seconds ? Number(seconds[1]) : 0;
+    if (![hh, mm, ss].every((n) => Number.isFinite(n))) return "";
+    if (hh > 0) return `${hh}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+    return `${mm}:${String(ss).padStart(2, "0")}`;
+  }
+
   function extractRelativePublished(text) {
     if (typeof text !== "string") return "";
     const match = text.match(RELATIVE_DATE_RE);
@@ -95,16 +113,32 @@
     return findPercentDurationWatched(renderer);
   }
 
+  // Playlist rows have used all three names. The current lockup puts the red
+  // bar on thumbnailBottomOverlayViewModel.progressBar…startPercent.
+  // percentWatched is the older progress-bar renderer. 0 is a real value, so
+  // a missing key must not be treated as zero until the tree is exhausted.
+  const PROGRESS_KEYS = ["percentDurationWatched", "percentWatched", "startPercent"];
+
+  function readExplicitPercent(node) {
+    if (!node || typeof node !== "object") return null;
+    for (const key of PROGRESS_KEYS) {
+      if (node[key] == null || node[key] === "") continue;
+      const n = Number(node[key]);
+      if (Number.isFinite(n)) return Math.min(100, Math.max(0, n));
+    }
+    return null;
+  }
+
   function findPercentDurationWatched(node, depth = 0) {
     if (!node || typeof node !== "object" || depth > 8) return 0;
-    const direct = node.percentDurationWatched;
-    if (Number.isFinite(Number(direct))) return Number(direct);
+    const direct = readExplicitPercent(node);
+    if (direct != null && direct > 0) return direct;
     const kids = Array.isArray(node) ? node : Object.values(node);
     for (const child of kids) {
       const found = findPercentDurationWatched(child, depth + 1);
       if (found) return found;
     }
-    return 0;
+    return direct ?? 0;
   }
 
   function videoRecord({
@@ -168,12 +202,30 @@
     }
   }
 
+  function collectAccessibilityLabels(node, labels, depth) {
+    if (!node || typeof node !== "object" || depth > 8) return;
+    if (typeof node.accessibilityLabel === "string") labels.push(node.accessibilityLabel);
+    if (typeof node.accessibilityText === "string") labels.push(node.accessibilityText);
+    const aria = node.accessibility?.accessibilityData?.label;
+    if (typeof aria === "string") labels.push(aria);
+    const kids = Array.isArray(node) ? node : Object.values(node);
+    for (const child of kids) {
+      if (child && typeof child === "object") collectAccessibilityLabels(child, labels, depth + 1);
+    }
+  }
+
   function durationFromLockup(lockup) {
     const texts = [];
     collectStrings(lockup?.contentImage, texts, 0, 8);
     for (const text of texts) {
       const trimmed = String(text).trim();
       if (/^\d+:\d{2}(?::\d{2})?$/.test(trimmed)) return trimmed;
+    }
+    const labels = [];
+    collectAccessibilityLabels(lockup?.contentImage, labels, 0);
+    for (const label of labels) {
+      const spoken = durationFromAccessibilityLabel(label);
+      if (spoken) return spoken;
     }
     return "";
   }
@@ -796,20 +848,32 @@
     };
   }
 
+  function percentFromWidth(width) {
+    if (typeof width !== "string" || !width.endsWith("%")) return null;
+    const n = Number.parseFloat(width);
+    return Number.isFinite(n) ? n : null;
+  }
+
   function progressFromRow(row) {
     const overlay = row.querySelector?.(
       "ytd-thumbnail-overlay-resume-playback-renderer",
     );
     const fromData = overlay?.data?.percentDurationWatched;
-    if (Number.isFinite(Number(fromData))) return Number(fromData);
+    if (fromData != null && fromData !== "" && Number.isFinite(Number(fromData))) {
+      return Number(fromData);
+    }
     const bar = overlay?.querySelector?.(
       "#progress, .style-scope.ytd-thumbnail-overlay-resume-playback-renderer",
     );
-    const width = bar?.style?.width;
-    if (width?.endsWith("%")) {
-      const n = Number.parseFloat(width);
-      if (Number.isFinite(n)) return n;
-    }
+    const fromBar = percentFromWidth(bar?.style?.width);
+    if (fromBar != null) return fromBar;
+    const modern = row.querySelector?.(
+      "[role='progressbar'], yt-thumbnail-overlay-progress-bar-view-model, ytd-thumbnail-overlay-progress-bar-renderer",
+    );
+    const aria = modern?.getAttribute?.("aria-valuenow");
+    if (aria != null && aria !== "" && Number.isFinite(Number(aria))) return Number(aria);
+    const fromModern = percentFromWidth(modern?.style?.width);
+    if (fromModern != null) return fromModern;
     return 0;
   }
 
@@ -864,11 +928,16 @@
   }
 
   function durationFromRow(row) {
-    return (
+    const visible =
       row.querySelector?.("ytd-thumbnail-overlay-time-status-renderer #text")?.textContent?.trim() ||
       row.querySelector?.("badge-shape, .yt-badge-shape__text")?.textContent?.trim() ||
-      ""
-    );
+      "";
+    if (/^\d+:\d{2}(?::\d{2})?$/.test(visible)) return visible;
+    const label =
+      row.querySelector?.("ytd-thumbnail-overlay-time-status-renderer")?.getAttribute?.("aria-label") ||
+      row.getAttribute?.("aria-label") ||
+      "";
+    return durationFromAccessibilityLabel(label) || visible;
   }
 
   function playlistRows() {

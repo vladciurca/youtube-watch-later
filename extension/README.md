@@ -47,6 +47,12 @@ The popup's **Automatic sync** block says, in this order:
 
 Those skipped checks are kept in `chrome.storage.local` under `autoSync` as `lastCheckAt` and `lastSkipReason`. The sync secret is handled exactly as before and is never shown. New permission in 1.5.0: `alarms`.
 
+### Update to 1.5.2 (Arc/Chrome on Mac)
+
+1. Unzip `extension/watch-later-sync.zip` over the folder the extension is loaded from, or into a new folder.
+2. Open `arc://extensions` (or `chrome://extensions`). Same folder: click reload on **Watch Later Sync**. New folder: remove the old one, **Load unpacked** on the new folder, then re-enter the Library URL and the sync secret. A new folder is a new extension identity with empty storage — without the secret, Run now cannot upload and the popup now says so instead of leaving the previous line in place.
+3. Confirm the extensions page shows version **1.5.2**. Open the popup and click **Run now**. Leave it open until the status line changes. A failure names the reason (no secret, 401/403, network, zero videos, tab timeout, or the run never starting). A success says how many videos were scraped.
+
 ### Update to 1.5.1 (Arc/Chrome on Mac)
 
 1. Unzip `extension/watch-later-sync.zip` over the folder the extension is loaded from (or into a new folder).

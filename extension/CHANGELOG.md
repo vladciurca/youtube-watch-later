@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.2
+
+- Run now records a specific result for every way it can finish without the library accepting the upload, and the popup shows that sentence (including in the status line under the buttons). Covered: no sync secret, a 401 or 403 from the server, a network error, a scrape that returned zero videos, an incomplete scrape, the Watch Later tab timing out, the background not answering ("Run never started"), and a run the browser killed before it finished ("Run never finished"). A whitespace-only secret is treated as missing. The background stays awake until that result is written, so closing the popup no longer drops the run on the floor and leaves yesterday's line in place.
+- The scraper reads the red progress bar from `startPercent` (bottom overlay) and `percentWatched`, not only `percentDurationWatched`. When a row's length is only in an accessibility label ("1 hour, 34 minutes, 39 seconds" or "12:05"), that label is used instead of storing 0:00.
+
 ## 1.5.1
 
 - A reused Watch Later tab is now reloaded before it is scraped. A tab left open (or put to sleep by Arc) still held the page data from whenever it loaded, so videos added to Watch Later since then were invisible to both the automatic and the manual sync.

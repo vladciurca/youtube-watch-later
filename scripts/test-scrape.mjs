@@ -232,6 +232,10 @@ function emptyTokenPage(token) {
 
 function makeDomRow(video, i) {
   return {
+    getAttribute(name) {
+      if (name === "aria-label") return video.ariaDuration || null;
+      return null;
+    },
     querySelector(sel) {
       if (sel === "a#video-title" || sel === "a#thumbnail") {
         return { href: `https://www.youtube.com/watch?v=${video.id}` };
@@ -240,7 +244,25 @@ function makeDomRow(video, i) {
       if (sel === "#channel-name" || sel === "ytd-channel-name") {
         return { textContent: video.author, innerText: video.author };
       }
-      if (sel.includes("time-status")) return { textContent: video.duration };
+      if (sel.includes("time-status")) {
+        return {
+          textContent: video.duration || "",
+          getAttribute(name) {
+            if (name === "aria-label") return video.ariaDuration || null;
+            return null;
+          },
+        };
+      }
+      if (sel.includes("progressbar") || sel.includes("progress-bar")) {
+        if (video.watchedPct == null) return null;
+        return {
+          style: { width: `${video.watchedPct}%` },
+          getAttribute(name) {
+            if (name === "aria-valuenow") return String(video.watchedPct);
+            return null;
+          },
+        };
+      }
       if (sel === "#index" || sel === "#index-container") {
         return { textContent: String(i + 1) };
       }
@@ -486,7 +508,7 @@ const PAGE = 100;
   assert.equal(helpers.playlistCountHint(initialPage(1, null, { headerCount: 676 })), 676);
 }
 
-assert.equal(manifest.version, "1.5.1");
+assert.equal(manifest.version, "1.5.2");
 assert.match(backgroundSource, /previousOnListCount/);
 assert.match(backgroundSource, /expectedCount/);
 assert.match(backgroundSource, /statedCount/);
@@ -610,6 +632,61 @@ assert.doesNotMatch(scrapeSource, /onResponseReceivedActions \|\|/);
   assert.equal(result.videos[0].watchedPct, 40);
   assert.equal(JSON.parse(fetchCalls[0].options.body).continuation, "tok-old-sibling");
   assert.equal(JSON.parse(fetchCalls[1].options.body).continuation, "tok-old-page-2");
+}
+
+{
+  // Current playlist lockups put the red progress bar under the bottom overlay
+  // (startPercent / percentWatched) and sometimes the length only in an
+  // accessibility label. Reading those as 0% and 0:00 drops the real progress.
+  const variants = JSON.parse(
+    readFileSync(join(root, "../extension/fixtures/browse-lockup-progress-variants.json"), "utf8"),
+  );
+  const { helpers } = loadScrape({ initial: variants, pages: [] });
+  const parsed = helpers.parseInnertubePlaylistPage(variants);
+  const zeev = parsed.videos.find((video) => video.id === "btt-7e0JIA4");
+  assert.ok(zeev, "Zeev lockup was not parsed");
+  assert.equal(zeev.title, "How One Man Invests $2.7B With No Employees | Oren Zeev");
+  assert.equal(zeev.author, "The Peel with Turner Novak");
+  assert.equal(zeev.watchedPct, 40, "startPercent on the bottom-overlay progress bar");
+  assert.equal(zeev.duration, "1:34:39", "duration spoken only in an accessibility label");
+  assert.equal(zeev.durationSec, 5679);
+  assert.equal(zeev.publishedLabel, "4 days ago");
+  const other = parsed.videos.find((video) => video.id === "pwatch00001");
+  assert.ok(other, "percentWatched lockup was not parsed");
+  assert.equal(other.watchedPct, 40, "percentWatched on thumbnailOverlayProgressBarRenderer");
+  assert.equal(other.duration, "12:05", "clock time only in an accessibility label");
+  assert.equal(other.durationSec, 725);
+}
+
+{
+  const { scrape } = loadScrape({
+    initial: initialPage(1, null, { headerCount: 2 }),
+    pages: [],
+    domVideos: [
+      {
+        id: "btt-7e0JIA4",
+        title: "How One Man Invests $2.7B With No Employees | Oren Zeev",
+        author: "The Peel with Turner Novak",
+        duration: "",
+        ariaDuration: "1 hour, 34 minutes, 39 seconds",
+        watchedPct: 40,
+      },
+      {
+        id: videoId(1),
+        title: "Second",
+        author: "Channel",
+        duration: "5:00",
+        watchedPct: 0,
+      },
+    ],
+  });
+  const result = await scrape();
+  assert.equal(result.method, "dom");
+  const zeev = result.videos.find((video) => video.id === "btt-7e0JIA4");
+  assert.ok(zeev, "DOM fallback missed the Zeev row");
+  assert.equal(zeev.watchedPct, 40, "DOM progress bar aria-valuenow");
+  assert.equal(zeev.duration, "1:34:39");
+  assert.equal(zeev.durationSec, 5679);
 }
 
 {

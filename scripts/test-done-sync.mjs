@@ -94,7 +94,7 @@ assert.equal(reasonLabel("age_restricted"), "age-restricted");
 
 // ---- manifest + safety wiring
 const manifest = JSON.parse(ext("manifest.json"));
-assert.equal(manifest.version, "1.5.1");
+assert.equal(manifest.version, "1.5.2");
 assert.deepEqual(manifest.permissions, ["storage", "tabs", "scripting", "alarms"], "only alarms is new");
 assert.ok(manifest.host_permissions.includes("https://www.youtube.com/*"));
 const bg = ext("background.js");

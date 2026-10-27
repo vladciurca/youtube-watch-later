@@ -1,0 +1,163 @@
+{
+  "header": {
+    "pageHeaderRenderer": {
+      "content": {
+        "pageHeaderViewModel": {
+          "title": { "dynamicTextViewModel": { "text": { "content": "Watch later" } } },
+          "metadata": {
+            "contentMetadataViewModel": {
+              "metadataRows": [
+                {
+                  "metadataParts": [
+                    { "text": { "content": "2 videos" } }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "contents": {
+    "twoColumnBrowseResultsRenderer": {
+      "tabs": [
+        {
+          "tabRenderer": {
+            "content": {
+              "sectionListRenderer": {
+                "contents": [
+                  {
+                    "itemSectionRenderer": {
+                      "contents": [
+                        {
+                          "lockupViewModel": {
+                            "contentId": "btt-7e0JIA4",
+                            "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+                            "metadata": {
+                              "lockupMetadataViewModel": {
+                                "title": {
+                                  "content": "How One Man Invests $2.7B With No Employees | Oren Zeev"
+                                },
+                                "metadata": {
+                                  "contentMetadataViewModel": {
+                                    "metadataRows": [
+                                      {
+                                        "metadataParts": [
+                                          { "text": { "content": "The Peel with Turner Novak" } }
+                                        ]
+                                      },
+                                      {
+                                        "metadataParts": [
+                                          { "text": { "content": "2.1K views" } },
+                                          { "text": { "content": "4 days ago" } }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            },
+                            "contentImage": {
+                              "thumbnailViewModel": {
+                                "overlays": [
+                                  {
+                                    "thumbnailBottomOverlayViewModel": {
+                                      "progressBar": {
+                                        "thumbnailOverlayProgressBarViewModel": {
+                                          "startPercent": 40
+                                        }
+                                      },
+                                      "badges": [
+                                        {
+                                          "thumbnailBadgeViewModel": {
+                                            "accessibilityText": "1 hour, 34 minutes, 39 seconds"
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            "rendererContext": {
+                              "commandContext": {
+                                "onTap": {
+                                  "innertubeCommand": {
+                                    "watchEndpoint": {
+                                      "videoId": "btt-7e0JIA4",
+                                      "playlistId": "WL",
+                                      "startTimeSeconds": 2271
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "lockupViewModel": {
+                            "contentId": "pwatch00001",
+                            "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+                            "metadata": {
+                              "lockupMetadataViewModel": {
+                                "title": { "content": "Percent watched variant" },
+                                "metadata": {
+                                  "contentMetadataViewModel": {
+                                    "metadataRows": [
+                                      {
+                                        "metadataParts": [
+                                          { "text": { "content": "Some Channel" } }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            },
+                            "contentImage": {
+                              "thumbnailViewModel": {
+                                "overlays": [
+                                  {
+                                    "thumbnailOverlayProgressBarRenderer": {
+                                      "percentWatched": 40
+                                    }
+                                  },
+                                  {
+                                    "thumbnailBadgeViewModel": {
+                                      "accessibility": {
+                                        "accessibilityData": {
+                                          "label": "12:05"
+                                        }
+                                      }
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            "rendererContext": {
+                              "commandContext": {
+                                "onTap": {
+                                  "innertubeCommand": {
+                                    "watchEndpoint": {
+                                      "videoId": "pwatch00001",
+                                      "playlistId": "WL"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
