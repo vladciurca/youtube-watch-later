@@ -94,13 +94,14 @@ assert.equal(reasonLabel("age_restricted"), "age-restricted");
 
 // ---- manifest + safety wiring
 const manifest = JSON.parse(ext("manifest.json"));
-assert.equal(manifest.version, "1.4.0");
-assert.deepEqual(manifest.permissions, ["storage", "tabs", "scripting"], "no new permissions");
+assert.equal(manifest.version, "1.5.0");
+assert.deepEqual(manifest.permissions, ["storage", "tabs", "scripting", "alarms"], "only alarms is new");
 assert.ok(manifest.host_permissions.includes("https://www.youtube.com/*"));
 const bg = ext("background.js");
 assert.match(bg, /message\.confirmed !== true/, "start needs explicit confirmation");
-assert.ok(!/chrome\.alarms|onInstalled|onStartup/.test(bg), "no automatic triggers");
-assert.equal((bg.match(/runDoneSync\(\)/g) || []).length, 2, "runDoneSync is only defined and called from the confirmed handler");
+assert.match(bg, /isAutoDoneEnabled\(stored\[AUTO_DONE_KEY\]\)/, "unattended Done step only runs when the user opted in");
+assert.match(bg, /runDoneSync\(\{ maxVideos: AUTO_DONE_CAP \}\)/, "unattended Done step is capped");
+assert.equal((bg.match(/runDoneSync\(\)/g) || []).length, 1, "the uncapped Done run only starts from the confirmed handler");
 assert.match(bg, /focused: false/, "videos open in an unfocused popup window");
 assert.match(bg, /muted: true/);
 assert.match(ext("popup.js"), /DONE_SYNC_PREVIEW/);

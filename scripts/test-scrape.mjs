@@ -486,7 +486,7 @@ const PAGE = 100;
   assert.equal(helpers.playlistCountHint(initialPage(1, null, { headerCount: 676 })), 676);
 }
 
-assert.equal(manifest.version, "1.4.0");
+assert.equal(manifest.version, "1.5.0");
 assert.match(backgroundSource, /previousOnListCount/);
 assert.match(backgroundSource, /expectedCount/);
 assert.match(backgroundSource, /statedCount/);

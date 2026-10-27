@@ -506,7 +506,7 @@ const popupJs = readFileSync(join(root, "../extension/popup.js"), "utf8");
 const backgroundJs = readFileSync(join(root, "../extension/background.js"), "utf8");
 const manifest = JSON.parse(readFileSync(join(root, "../extension/manifest.json"), "utf8"));
 const syncJs = readFileSync(join(root, "../api/sync.js"), "utf8");
-assert.equal(manifest.version, "1.4.0");
+assert.equal(manifest.version, "1.5.0");
 assert.match(backgroundJs, /previousOnListCount/);
 assert.match(backgroundJs, /statedCount/);
 assert.match(syncJs, /body\.statedCount/);

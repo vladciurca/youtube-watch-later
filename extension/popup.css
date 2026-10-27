@@ -131,3 +131,33 @@ button.link {
 [hidden] {
   display: none !important;
 }
+
+.auto-sync {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid #23232c;
+}
+
+.auto-sync h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+label.check {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  color: #c4c4cc;
+}
+
+label.check input {
+  margin-top: 2px;
+  flex: none;
+}
+
+#autoStatus {
+  white-space: pre-line;
+}

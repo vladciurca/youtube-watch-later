@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Watch Later Sync",
-  "version": "1.4.0",
-  "description": "Scrape YouTube Watch Later progress while logged in, then upsert Vlad's library. Manual Sync Done to YouTube marks Done videos watched.",
+  "version": "1.5.0",
+  "description": "Scrape YouTube Watch Later progress while logged in and upsert Vlad's library, automatically once a day while the browser is open. Manual Sync Done to YouTube marks Done videos watched.",
   "action": {
     "default_popup": "popup.html",
     "default_title": "Sync Watch Later"
@@ -14,7 +14,8 @@
   "permissions": [
     "storage",
     "tabs",
-    "scripting"
+    "scripting",
+    "alarms"
   ],
   "host_permissions": [
     "https://www.youtube.com/*",
