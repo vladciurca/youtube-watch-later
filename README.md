@@ -101,7 +101,7 @@ npm run preview
 - No filters: every video shows on load, including Done and Dropped. Status and category chips start unselected (single-select chips; click one to filter, click the selected chip to show all again). The search box starts empty and the Dropped toggle starts off, which does not hide dropped videos while no status is selected.
 - Sort: **Saved** — YouTube Watch Later order (`savedRank` 0 is the top of the list). Until the first sync, the seed has no rank and **Saved** keeps the seed's order. **Remaining** sorts least leftover time among unfinished videos first, Done / 100% last. Leftover under an hour shows `M:SS` (e.g. `6:00 left`); hours stay `1h 4m left`. **Published** sorts newest upload first, missing dates last. **Watched %** still sorts highest `watchedPct` first
 
-Click a row to open `https://www.youtube.com/watch?v={id}&t={t}s` in a new tab. That click does not change `watchedPct` or `status`.
+Click a row to open `https://www.youtube.com/watch?v={id}&t={t}s` in a new tab. That click does not change `watchedPct` or `status`. Every row also has an **Open in YouTube** button: on iPhone it uses the `youtube://` app scheme so the YouTube app opens (for Premium offline downloads); if the app is missing it falls back to the same https resume link.
 
 ## Queue
 
@@ -112,7 +112,20 @@ A star on every row adds or removes a video from the **Queue**. The **Queue** ta
 - **Mark done:** each row (and each Queue row) has a check button. It stores an explicit Done in its own private Blob, `watch-later/done.json`, via `/api/done` (POST `{ op: { type: "done" | "undone", id } }`), which a sync never writes, so it survives syncs even if YouTube progress is lower. Marking done also removes the video from the Queue; the check button on a marked row is "Mark not done" (undo). Videos already at 100% on YouTube show a locked check.
 - Reordering on touch uses native non-passive touch listeners on the drag handle only (iOS Safari needs this to stop the page scrolling); mouse uses pointer events. Move-to-top / up / down buttons are 44px on phones.
 - The Queue never touches YouTube's real Watch Later playlist.
-- If the Queue API cannot be reached (e.g. no `BLOB_READ_WRITE_TOKEN`), stars are disabled and the tab says the Queue is unavailable; the rest of the library works as before.
+- If the Queue API cannot be reached (e.g. no `BLOB_READ_WRITE_TOKEN` while you are online and have no saved list yet), the tab says the Queue is unavailable. Once a list has been saved on the device, Done and Queue taps still work offline and sync when the connection returns.
+
+## Offline on iPhone
+
+The site is an installable PWA. After you open it once while online, the last-fetched library, Done/Queue state, and thumbnails are cached and the app shell loads without a network. Done and Queue changes made offline are queued on the device and synced when you are back online (and again when you reopen the app).
+
+On iPhone:
+
+1. Open the site in Safari while online and wait for the list to appear.
+2. Share → **Add to Home Screen**. Home Screen is what keeps the cache around; Safari may evict site data for a page you only visit in the tab switcher.
+3. Open the home-screen icon later, including in airplane mode. An **Offline, showing saved list from …** banner appears when there is no connection.
+4. Use **Open in YouTube** on a video to open it in the YouTube app and download it there with Premium.
+
+iOS notes: service workers work in Safari and in home-screen PWAs. Storage can still be evicted under memory pressure, especially if the app was never added to the Home Screen. Playing a video still needs a network or a YouTube Premium download in the YouTube app; this app does not store the videos themselves.
 
 ## Out of scope
 
