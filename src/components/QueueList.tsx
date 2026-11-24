@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { Video } from "../types";
-import { DoneButton, DownloadedButton, OpenInYouTubeButton, StarButton, VideoRow } from "./VideoRow";
+import { DoneButton, DownloadedButton, StarButton, VideoRow } from "./VideoRow";
 import type { DoneControls, DownloadedControls, QueueControls } from "./VideoRow";
 
 interface QueueListProps {
@@ -300,7 +300,6 @@ export function QueueList({
             />
             <VideoRow video={video} bare />
             <div className="row-actions queue-actions">
-              <OpenInYouTubeButton video={video} />
               <DownloadedButton video={video} downloaded={downloaded} />
               <button
                 type="button"

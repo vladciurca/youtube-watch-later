@@ -186,8 +186,11 @@ const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 assert.match(read("../src/components/VideoRow.tsx"), /Mark downloaded/);
 assert.match(read("../src/components/VideoRow.tsx"), /Downloaded/);
 assert.match(read("../src/components/Header.tsx"), /downloadedCount/);
-assert.match(read("../public/sw.js"), /wl-offline-v2/);
+assert.match(read("../public/sw.js"), /wl-offline-v3/);
 assert.match(read("../public/sw.js"), /\/api\/downloaded/);
+assert.doesNotMatch(read("../src/components/VideoRow.tsx"), /Open in YouTube|OpenInYouTubeButton|yt-btn/);
+assert.doesNotMatch(read("../src/components/QueueList.tsx"), /OpenInYouTubeButton|yt-btn/);
+assert.match(read("../src/components/VideoRow.tsx"), /youtubeOpenHref/);
 assert.match(read("../api/done.js"), /undownloaded/);
 assert.match(read("../api/sync.js"), /pruneDownloadedForLibrary/);
 

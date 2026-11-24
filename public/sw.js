@@ -1,5 +1,5 @@
 /* Watch Later offline cache: app shell, last library/done/queue/downloaded responses, thumbnails. */
-const VERSION = "wl-offline-v2";
+const VERSION = "wl-offline-v3";
 const SHELL = `${VERSION}-shell`;
 const DATA = `${VERSION}-data`;
 const THUMBS = `${VERSION}-thumbs`;

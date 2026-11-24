@@ -9,23 +9,33 @@ export function isIOS(): boolean {
   return navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1;
 }
 
-export function youtubeAppUrl(video: Pick<Video, "id">): string {
-  return `youtube://www.youtube.com/watch?v=${video.id}`;
+/** youtube:// URL, with a resume time only when one exists. */
+export function youtubeAppUrl(video: Pick<Video, "id" | "t">): string {
+  const start =
+    typeof video.t === "number" && Number.isFinite(video.t) && video.t > 0
+      ? `&t=${Math.round(video.t)}s`
+      : "";
+  return `youtube://www.youtube.com/watch?v=${video.id}${start}`;
+}
+
+/** Row href: app scheme on iOS, the existing https resume URL on desktop. */
+export function youtubeOpenHref(video: Pick<Video, "id" | "t">): string {
+  return isIOS() ? youtubeAppUrl(video) : youtubeResumeUrl(video);
 }
 
 /**
- * On iOS Safari and home-screen PWAs, the youtube:// scheme hands off to the
- * YouTube app (universal https links often stay inside the PWA). If the app
- * does not open, fall back to the https resume URL, which still works on the
- * web and may open the app via universal links in Safari.
+ * On iOS Safari and home-screen PWAs, follow the youtube:// href so the
+ * YouTube app opens (universal https links often stay inside the PWA). If
+ * the app does not open, fall back to the https resume URL.
+ * Desktop rows keep a normal target=_blank https link and should not call this.
  */
-export function openInYouTube(video: Video): void {
+export function openYouTubeFromRow(
+  event: { preventDefault: () => void },
+  video: Video,
+): void {
+  if (!isIOS()) return;
+  event.preventDefault();
   const web = youtubeResumeUrl(video);
-  if (!isIOS()) {
-    window.open(web, "_blank", "noopener,noreferrer");
-    return;
-  }
-
   const fallback = window.setTimeout(() => {
     window.location.href = web;
   }, 900);

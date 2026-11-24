@@ -992,7 +992,6 @@ p {
 
 .star-btn,
 .done-btn,
-.yt-btn,
 .dl-btn,
 .move-btn,
 .drag-handle {
@@ -1012,7 +1011,6 @@ p {
 
 .star-btn:hover:not(:disabled),
 .done-btn:hover:not(:disabled),
-.yt-btn:hover:not(:disabled),
 .dl-btn:hover:not(:disabled),
 .move-btn:hover:not(:disabled),
 .drag-handle:hover {
@@ -1042,7 +1040,6 @@ p {
 
 .star-btn:disabled,
 .done-btn:disabled,
-.yt-btn:disabled,
 .dl-btn:disabled,
 .move-btn:disabled {
   opacity: 0.35;
@@ -1172,7 +1169,6 @@ p {
 
   .star-btn,
   .done-btn,
-  .yt-btn,
   .dl-btn,
   .move-btn {
     min-width: 44px;
@@ -1214,7 +1210,6 @@ p {
   .queue-actions .move-btn,
   .queue-actions .done-btn,
   .queue-actions .star-btn,
-  .queue-actions .yt-btn,
   .queue-actions .dl-btn {
     flex: 1 1 0;
     min-height: 44px;
