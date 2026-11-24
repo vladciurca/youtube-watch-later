@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { Video } from "../types";
-import { DoneButton, StarButton, VideoRow } from "./VideoRow";
+import { DoneButton, OpenInYouTubeButton, StarButton, VideoRow } from "./VideoRow";
 import type { DoneControls, QueueControls } from "./VideoRow";
 
 interface QueueListProps {
@@ -296,8 +296,9 @@ export function QueueList({
               onEnd={finishDrag}
               onNudge={(type) => onMove(video.id, type)}
             />
-            <VideoRow video={video} />
+            <VideoRow video={video} bare />
             <div className="row-actions queue-actions">
+              <OpenInYouTubeButton video={video} />
               <button
                 type="button"
                 className="move-btn"

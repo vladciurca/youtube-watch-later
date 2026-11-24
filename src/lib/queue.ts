@@ -2,6 +2,7 @@ import { applyQueueOp, emptyQueue, normalizeQueue, queueIds } from "../../api/_l
 import type { Queue, QueueOp } from "../../api/_lib/queue.mjs";
 import type { Video } from "../types";
 import { isDoneVideo } from "../../api/_lib/threshold.mjs";
+import { httpError, networkError } from "./sync-error";
 
 export type { Queue, QueueOp };
 export { applyQueueOp, emptyQueue, normalizeQueue, queueIds };
@@ -30,17 +31,27 @@ export function reorderIds(ids: string[], id: string, insertIndex: number): stri
 }
 
 export async function fetchQueue(): Promise<Queue> {
-  const response = await fetch("/api/queue", { cache: "no-store" });
-  if (!response.ok) throw new Error(`Queue request failed (${response.status})`);
+  let response: Response;
+  try {
+    response = await fetch("/api/queue", { cache: "no-store" });
+  } catch {
+    throw networkError("Queue request failed");
+  }
+  if (!response.ok) throw httpError(`Queue request failed (${response.status})`, response.status);
   return normalizeQueue(await response.json());
 }
 
 export async function sendQueueOp(op: QueueOp): Promise<Queue> {
-  const response = await fetch("/api/queue", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ op }),
-  });
+  let response: Response;
+  try {
+    response = await fetch("/api/queue", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ op }),
+    });
+  } catch {
+    throw networkError();
+  }
   if (!response.ok) {
     let detail = "";
     try {
@@ -48,7 +59,7 @@ export async function sendQueueOp(op: QueueOp): Promise<Queue> {
     } catch {
       // ignore
     }
-    throw new Error(detail || `Queue update failed (${response.status})`);
+    throw httpError(detail || `Queue update failed (${response.status})`, response.status);
   }
   return normalizeQueue(await response.json());
 }

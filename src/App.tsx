@@ -24,6 +24,17 @@ import {
 import type { Queue, QueueOp } from "./lib/queue";
 import { applyDoneOp, applyDoneOverrides, emptyDone, fetchDone, sendDoneOp } from "./lib/done";
 import type { DoneList, DoneOp } from "./lib/done";
+import {
+  enqueuePendingAction,
+  flushPendingActions,
+  pendingActionCount,
+  readDoneCache,
+  readLibraryCache,
+  readQueueCache,
+  writeDoneCache,
+  writeLibraryCache,
+  writeQueueCache,
+} from "./lib/offline-store";
 import type {
   LibraryFilters,
   SortKey,
@@ -32,6 +43,12 @@ import type {
   VideoLibrary,
   WatchStatus,
 } from "./types";
+
+function formatCachedAt(cachedAt: string): string {
+  const date = new Date(cachedAt);
+  if (Number.isNaN(date.getTime())) return cachedAt;
+  return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
 
 export default function App() {
   const [rawVideos, setVideos] = useState<Video[]>([]);
@@ -46,64 +63,112 @@ export default function App() {
   const [doneList, setDoneList] = useState<DoneList>(emptyDone);
   const [doneAvailable, setDoneAvailable] = useState(true);
   const doneRef = useRef<DoneList>(doneList);
-  const donePending = useRef(0);
   const doneEpoch = useRef(0);
-  const doneChain = useRef<Promise<unknown>>(Promise.resolve());
   const [view, setView] = useState<LibraryView>("all");
   const [queue, setQueue] = useState<Queue>(emptyQueue);
   const [queueReady, setQueueReady] = useState(false);
   const [queueAvailable, setQueueAvailable] = useState(true);
   const [queueNotice, setQueueNotice] = useState<string | null>(null);
   const queueRef = useRef<Queue>(queue);
-  const queuePending = useRef(0);
-  // Bumped on every local change so an older in-flight read cannot overwrite it.
   const queueEpoch = useRef(0);
-  const queueChain = useRef<Promise<unknown>>(Promise.resolve());
+  const [offline, setOffline] = useState(
+    typeof navigator !== "undefined" ? navigator.onLine === false : false,
+  );
+  const [cachedAt, setCachedAt] = useState<string | null>(null);
+  const [pendingCount, setPendingCount] = useState(0);
+  const pendingRef = useRef(0);
+  const flushing = useRef(false);
+  const flushAgain = useRef(false);
 
   const commitQueue = useCallback((next: Queue) => {
     queueRef.current = next;
     setQueue(next);
   }, []);
 
+  const commitDone = useCallback((next: DoneList) => {
+    doneRef.current = next;
+    setDoneList(next);
+  }, []);
+
+  const runFlush = useCallback(async () => {
+    if (flushing.current) {
+      flushAgain.current = true;
+      return;
+    }
+    flushing.current = true;
+    try {
+      do {
+        flushAgain.current = false;
+        const result = await flushPendingActions({
+          sendDone: (op) => sendDoneOp(op as DoneOp),
+          sendQueue: (op) => sendQueueOp(op as QueueOp),
+        });
+        pendingRef.current = result.remaining.length;
+        setPendingCount(result.remaining.length);
+        if (result.remaining.length === 0 && !flushAgain.current) {
+          if (result.results.done) {
+            const saved = result.results.done as DoneList;
+            doneEpoch.current += 1;
+            commitDone(saved);
+            await writeDoneCache(saved);
+          }
+          if (result.results.queue) {
+            const saved = result.results.queue as Queue;
+            queueEpoch.current += 1;
+            commitQueue(saved);
+            await writeQueueCache(saved);
+          }
+          setQueueNotice(null);
+        } else if (result.error && typeof navigator !== "undefined" && navigator.onLine) {
+          setQueueNotice(
+            result.error instanceof Error ? result.error.message : "Could not sync changes",
+          );
+        }
+      } while (flushAgain.current);
+    } finally {
+      flushing.current = false;
+      const pending = await pendingActionCount();
+      pendingRef.current = pending;
+      setPendingCount(pending);
+    }
+  }, [commitDone, commitQueue]);
+
   const loadQueue = useCallback(async () => {
-    if (queuePending.current > 0) return;
+    if (pendingRef.current > 0) return;
     const epoch = queueEpoch.current;
     try {
       const next = await fetchQueue();
-      if (queuePending.current > 0 || epoch !== queueEpoch.current) return;
+      if (pendingRef.current > 0 || epoch !== queueEpoch.current) return;
       commitQueue(next);
+      await writeQueueCache(next);
       setQueueAvailable(true);
     } catch {
-      setQueueAvailable(false);
+      const cached = await readQueueCache();
+      if (cached && pendingRef.current === 0 && epoch === queueEpoch.current) commitQueue(cached);
+      setQueueAvailable(true);
     } finally {
       setQueueReady(true);
     }
   }, [commitQueue]);
+
+  const enqueueOp = useCallback(
+    async (kind: "done" | "queue", op: object) => {
+      const next = await enqueuePendingAction({ kind, op });
+      pendingRef.current = next.length;
+      setPendingCount(next.length);
+      if (typeof navigator === "undefined" || navigator.onLine) await runFlush();
+    },
+    [runFlush],
+  );
 
   const mutateQueue = useCallback(
     (op: QueueOp) => {
       queueEpoch.current += 1;
       commitQueue(applyQueueOp(queueRef.current, op));
       setQueueNotice(null);
-      queuePending.current += 1;
-      queueChain.current = queueChain.current.then(async () => {
-        try {
-          const saved = await sendQueueOp(op);
-          queuePending.current -= 1;
-          if (queuePending.current === 0) {
-            queueEpoch.current += 1;
-            commitQueue(saved);
-          }
-        } catch (err) {
-          queuePending.current -= 1;
-          setQueueNotice(
-            err instanceof Error ? err.message : "Could not update the Queue",
-          );
-          if (queuePending.current === 0) await loadQueue();
-        }
-      });
+      void enqueueOp("queue", op);
     },
-    [commitQueue, loadQueue],
+    [commitQueue, enqueueOp],
   );
 
   const videos = useMemo(
@@ -111,21 +176,19 @@ export default function App() {
     [rawVideos, doneList],
   );
 
-  const commitDone = useCallback((next: DoneList) => {
-    doneRef.current = next;
-    setDoneList(next);
-  }, []);
-
   const loadDoneList = useCallback(async () => {
-    if (donePending.current > 0) return;
+    if (pendingRef.current > 0) return;
     const epoch = doneEpoch.current;
     try {
       const next = await fetchDone();
-      if (donePending.current > 0 || epoch !== doneEpoch.current) return;
+      if (pendingRef.current > 0 || epoch !== doneEpoch.current) return;
       commitDone(next);
+      await writeDoneCache(next);
       setDoneAvailable(true);
     } catch {
-      setDoneAvailable(false);
+      const cached = await readDoneCache();
+      if (cached && pendingRef.current === 0 && epoch === doneEpoch.current) commitDone(cached);
+      setDoneAvailable(true);
     }
   }, [commitDone]);
 
@@ -134,23 +197,9 @@ export default function App() {
       doneEpoch.current += 1;
       commitDone(applyDoneOp(doneRef.current, op));
       setQueueNotice(null);
-      donePending.current += 1;
-      doneChain.current = doneChain.current.then(async () => {
-        try {
-          const saved = await sendDoneOp(op);
-          donePending.current -= 1;
-          if (donePending.current === 0) {
-            doneEpoch.current += 1;
-            commitDone(saved);
-          }
-        } catch (err) {
-          donePending.current -= 1;
-          setQueueNotice(err instanceof Error ? err.message : "Could not save Done");
-          if (donePending.current === 0) await loadDoneList();
-        }
-      });
+      void enqueueOp("done", op);
     },
-    [commitDone, loadDoneList],
+    [commitDone, enqueueOp],
   );
 
   const toggleDone = useCallback(
@@ -161,33 +210,142 @@ export default function App() {
     [mutateDone],
   );
 
+  const loadLibrary = useCallback(async () => {
+    const apply = (data: VideoLibrary, fromLive: boolean) => {
+      setVideos(data.videos);
+      setSource(data.source);
+      setSyncedAt(data.syncedAt ?? null);
+      setLive(fromLive || data.live === true);
+      setPartial(data.partial === true);
+      setError(null);
+    };
+
+    const cached = await readLibraryCache();
+
+    try {
+      const liveResponse = await fetch("/api/library", { cache: "no-store" });
+      const fromSwCache = liveResponse.headers.get("X-Offline-Cache") === "1";
+      if (liveResponse.ok) {
+        const liveData = (await liveResponse.json()) as VideoLibrary;
+        if (Array.isArray(liveData.videos) && liveData.videos.length > 0) {
+          apply(liveData, true);
+          if (fromSwCache) {
+            setCachedAt(cached?.cachedAt ?? new Date().toISOString());
+          } else {
+            const savedAt = new Date().toISOString();
+            await writeLibraryCache(liveData, savedAt);
+            setCachedAt(savedAt);
+          }
+          return;
+        }
+      }
+    } catch {
+      // Seed JSON or the local cache remains the fallback.
+    }
+
+    if (cached) {
+      apply(cached.library, cached.library.live === true);
+      setCachedAt(cached.cachedAt);
+      return;
+    }
+
+    const response = await fetch("/data/videos.json");
+    if (!response.ok) {
+      throw new Error(`Snapshot request failed (${response.status})`);
+    }
+    const seed = (await response.json()) as VideoLibrary;
+    apply(seed, false);
+    const fromSwCache = response.headers.get("X-Offline-Cache") === "1";
+    const savedAt = new Date().toISOString();
+    if (!fromSwCache) await writeLibraryCache(seed, savedAt);
+    setCachedAt(savedAt);
+  }, []);
+
   useEffect(() => {
-    const first = setTimeout(() => {
-      void loadQueue();
-      void loadDoneList();
-    }, 0);
-    // The same Queue on phone and laptop: re-read it whenever this tab is shown again.
     const onVisible = () => {
       if (document.visibilityState === "visible") {
         void loadQueue();
         void loadDoneList();
+        if (typeof navigator === "undefined" || navigator.onLine) void runFlush();
       }
     };
+    const onOnline = () => {
+      setOffline(false);
+      void runFlush().then(() => {
+        void loadLibrary();
+        void loadQueue();
+        void loadDoneList();
+      });
+    };
+    const onOffline = () => setOffline(true);
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
     return () => {
-      clearTimeout(first);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
     };
-  }, [loadQueue, loadDoneList]);
+  }, [loadQueue, loadDoneList, loadLibrary, runFlush]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function boot() {
+      try {
+        const [cachedLib, cachedDone, cachedQueue, pending] = await Promise.all([
+          readLibraryCache(),
+          readDoneCache(),
+          readQueueCache(),
+          pendingActionCount(),
+        ]);
+        if (cancelled) return;
+        pendingRef.current = pending;
+        setPendingCount(pending);
+        if (cachedDone) commitDone(cachedDone);
+        if (cachedQueue) {
+          commitQueue(cachedQueue);
+          setQueueReady(true);
+        }
+        if (cachedLib) {
+          setVideos(cachedLib.library.videos);
+          setSource(cachedLib.library.source);
+          setSyncedAt(cachedLib.library.syncedAt ?? null);
+          setLive(cachedLib.library.live === true);
+          setPartial(cachedLib.library.partial === true);
+          setCachedAt(cachedLib.cachedAt);
+          setLoading(false);
+        }
+        if (typeof navigator === "undefined" || navigator.onLine) void runFlush();
+        await loadLibrary();
+        if (cancelled) return;
+        void loadQueue();
+        void loadDoneList();
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Unknown error");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void boot();
+    return () => {
+      cancelled = true;
+    };
+  }, [commitDone, commitQueue, loadLibrary, loadQueue, loadDoneList, runFlush]);
 
   const ids = useMemo(() => queueIds(queue), [queue]);
   const idSet = useMemo(() => new Set(ids), [ids]);
   const queued = useMemo(() => queuedVideos(videos, ids), [videos, ids]);
   // A queued video that is now Done leaves the Queue (the server prunes it too).
   const queuedDone = useMemo(
-    () => (videos.length === 0 ? [] : ids.filter((id) => !queued.some((v) => v.id === id) && videos.some((v) => v.id === id))),
+    () =>
+      videos.length === 0
+        ? []
+        : ids.filter((id) => !queued.some((v) => v.id === id) && videos.some((v) => v.id === id)),
     [videos, ids, queued],
   );
   useEffect(() => {
@@ -197,7 +355,10 @@ export default function App() {
 
   const toggleQueue = useCallback(
     (video: Video) => {
-      mutateQueue({ type: queueRef.current.items.some((i) => i.id === video.id) ? "remove" : "add", id: video.id });
+      mutateQueue({
+        type: queueRef.current.items.some((i) => i.id === video.id) ? "remove" : "add",
+        id: video.id,
+      });
     },
     [mutateQueue],
   );
@@ -218,61 +379,7 @@ export default function App() {
     [videos, mutateQueue],
   );
 
-  const loadLibrary = useCallback(async () => {
-    const apply = (data: VideoLibrary, fromLive: boolean) => {
-      setVideos(data.videos);
-      setSource(data.source);
-      setSyncedAt(data.syncedAt ?? null);
-      setLive(fromLive || data.live === true);
-      setPartial(data.partial === true);
-      setError(null);
-    };
-
-    try {
-      const liveResponse = await fetch("/api/library", { cache: "no-store" });
-      if (liveResponse.ok) {
-        const liveData = (await liveResponse.json()) as VideoLibrary;
-        if (Array.isArray(liveData.videos) && liveData.videos.length > 0) {
-          apply(liveData, true);
-          return;
-        }
-      }
-    } catch {
-      // Seed JSON remains the fallback until the first successful sync.
-    }
-
-    const response = await fetch("/data/videos.json");
-    if (!response.ok) {
-      throw new Error(`Snapshot request failed (${response.status})`);
-    }
-    apply((await response.json()) as VideoLibrary, false);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      try {
-        await loadLibrary();
-        if (cancelled) return;
-      } catch (err) {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Unknown error");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [loadLibrary]);
-
-  const visible = useMemo(
-    () => filterAndSortVideos(videos, filters),
-    [videos, filters],
-  );
+  const visible = useMemo(() => filterAndSortVideos(videos, filters), [videos, filters]);
 
   const counts = useMemo(
     () =>
@@ -310,6 +417,7 @@ export default function App() {
     setLoading(true);
     void loadQueue();
     void loadDoneList();
+    if (typeof navigator === "undefined" || navigator.onLine) void runFlush();
     try {
       await loadLibrary();
     } catch (err) {
@@ -317,7 +425,18 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [loadLibrary, loadQueue, loadDoneList]);
+  }, [loadLibrary, loadQueue, loadDoneList, runFlush]);
+
+  const bannerTime = cachedAt ? formatCachedAt(cachedAt) : null;
+  const pendingText =
+    pendingCount > 0
+      ? `${pendingCount} ${pendingCount === 1 ? "change" : "changes"} waiting to sync`
+      : null;
+  const offlineText = offline
+    ? bannerTime
+      ? `Offline, showing saved list from ${bannerTime}`
+      : "Offline, showing saved list"
+    : null;
 
   return (
     <div
@@ -361,6 +480,16 @@ export default function App() {
             setFiltersOpen(false);
           }}
         />
+        {offlineText ? (
+          <p className="offline-banner" role="status">
+            {offlineText}
+            {pendingText ? ` · ${pendingText}` : null}
+          </p>
+        ) : pendingText ? (
+          <p className="offline-banner is-pending" role="status">
+            {pendingText}
+          </p>
+        ) : null}
         {queueNotice ? (
           <p className="queue-notice" role="alert">
             {queueNotice}

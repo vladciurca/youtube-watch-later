@@ -6,6 +6,7 @@ import {
   thumbnailUrl,
   youtubeResumeUrl,
 } from "../lib/library";
+import { openInYouTube } from "../lib/youtube-app";
 
 export interface QueueControls {
   /** False when the queue backend could not be reached. */
@@ -24,6 +25,8 @@ interface VideoRowProps {
   video: Video;
   queue?: QueueControls;
   done?: DoneControls;
+  /** Render only the video link; QueueList supplies its own toolbar. */
+  bare?: boolean;
 }
 
 const STATUS_CLASS: Record<WatchStatus, string> = {
@@ -72,6 +75,30 @@ export function StarButton({
   );
 }
 
+
+export function OpenInYouTubeButton({ video }: { video: Video }) {
+  return (
+    <button
+      type="button"
+      className="yt-btn"
+      aria-label="Open in YouTube"
+      title="Open in YouTube"
+      onClick={() => openInYouTube(video)}
+    >
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <path
+          d="M21.6 7.2a3 3 0 0 0-2.1-2.1C17.7 4.7 12 4.7 12 4.7s-5.7 0-7.5.4A3 3 0 0 0 2.4 7.2 31 31 0 0 0 2 12a31 31 0 0 0 .4 4.8 3 3 0 0 0 2.1 2.1c1.8.4 7.5.4 7.5.4s5.7 0 7.5-.4a3 3 0 0 0 2.1-2.1A31 31 0 0 0 22 12a31 31 0 0 0-.4-4.8z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinejoin="round"
+        />
+        <path d="M10 9.3v5.4l5.1-2.7z" fill="currentColor" />
+      </svg>
+    </button>
+  );
+}
+
 export function DoneButton({ video, done }: { video: Video; done: DoneControls }) {
   const finished = isDone(video);
   const manual = video.markedDone === true;
@@ -115,7 +142,7 @@ export function DoneButton({ video, done }: { video: Video; done: DoneControls }
   );
 }
 
-export function VideoRow({ video, queue, done }: VideoRowProps) {
+export function VideoRow({ video, queue, done, bare }: VideoRowProps) {
   const pct = Math.min(100, Math.max(0, video.watchedPct));
   const published = publishedDisplay(video);
 
@@ -184,11 +211,12 @@ export function VideoRow({ video, queue, done }: VideoRowProps) {
     </a>
   );
 
-  if (!queue && !done) return row;
+  if (bare) return row;
   return (
     <div className="video-item">
       {row}
       <div className="row-actions">
+        <OpenInYouTubeButton video={video} />
         {done ? <DoneButton video={video} done={done} /> : null}
         {queue ? <StarButton video={video} queue={queue} /> : null}
       </div>

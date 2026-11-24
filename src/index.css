@@ -991,6 +991,7 @@ p {
 
 .star-btn,
 .done-btn,
+.yt-btn,
 .move-btn,
 .drag-handle {
   display: inline-flex;
@@ -1009,6 +1010,7 @@ p {
 
 .star-btn:hover:not(:disabled),
 .done-btn:hover:not(:disabled),
+.yt-btn:hover:not(:disabled),
 .move-btn:hover:not(:disabled),
 .drag-handle:hover {
   color: var(--text);
@@ -1029,6 +1031,7 @@ p {
 
 .star-btn:disabled,
 .done-btn:disabled,
+.yt-btn:disabled,
 .move-btn:disabled {
   opacity: 0.35;
   cursor: default;
@@ -1084,6 +1087,23 @@ p {
   bottom: -2px;
 }
 
+
+.offline-banner {
+  margin: 8px 22px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #3d3a22;
+  background: #1c1a12;
+  color: #e8d48a;
+  font-size: 13px;
+}
+
+.offline-banner.is-pending {
+  border-color: #2a3340;
+  background: #141820;
+  color: #b8c4d6;
+}
+
 .queue-notice {
   margin: 8px 22px 0;
   padding: 8px 12px;
@@ -1107,7 +1127,24 @@ p {
     min-height: 40px;
   }
 
-  .queue-notice {
+  
+.offline-banner {
+  margin: 8px 22px 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #3d3a22;
+  background: #1c1a12;
+  color: #e8d48a;
+  font-size: 13px;
+}
+
+.offline-banner.is-pending {
+  border-color: #2a3340;
+  background: #141820;
+  color: #b8c4d6;
+}
+
+.queue-notice {
     margin: 8px 12px 0;
   }
 
@@ -1122,6 +1159,7 @@ p {
 
   .star-btn,
   .done-btn,
+  .yt-btn,
   .move-btn {
     min-width: 44px;
     min-height: 44px;
@@ -1161,7 +1199,8 @@ p {
 
   .queue-actions .move-btn,
   .queue-actions .done-btn,
-  .queue-actions .star-btn {
+  .queue-actions .star-btn,
+  .queue-actions .yt-btn {
     flex: 1 1 0;
     min-height: 44px;
     background: #17171d;
