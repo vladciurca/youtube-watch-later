@@ -2,7 +2,8 @@ import { applyDoneOp, doneIds } from "./_lib/done.mjs";
 import { handleOptions, json, readJsonBody } from "./_lib/http.mjs";
 import { applyQueueOp } from "./_lib/queue.mjs";
 import { isVideoId } from "./_lib/queue.mjs";
-import { loadDone, loadExistingLibrary, loadQueue, saveDone, saveQueue } from "./_lib/store.mjs";
+import { applyDownloadedOp } from "./_lib/downloaded.mjs";
+import { loadDone, loadDownloaded, loadExistingLibrary, loadQueue, saveDone, saveDownloaded, saveQueue } from "./_lib/store.mjs";
 
 function view(done) {
   return { ok: true, updatedAt: done.updatedAt, items: done.items, ids: doneIds(done) };
@@ -62,7 +63,7 @@ export default async function handler(req, res) {
     const next = applyDoneOp(current, op);
     if (next.items.length !== current.items.length) await saveDone(next);
 
-    // Marking done also takes the video off the Queue.
+    // Marking done also takes the video off the Queue and clears Downloaded.
     if (op.type === "done") {
       try {
         const queue = await loadQueue();
@@ -70,6 +71,13 @@ export default async function handler(req, res) {
         if (without.items.length !== queue.items.length) await saveQueue(without);
       } catch {
         // The queue read prunes Done videos anyway.
+      }
+      try {
+        const downloaded = await loadDownloaded();
+        const without = applyDownloadedOp(downloaded, { type: "undownloaded", id: op.id });
+        if (without.items.length !== downloaded.items.length) await saveDownloaded(without);
+      } catch {
+        // GET /api/downloaded prunes Done videos anyway.
       }
     }
     json(res, 200, view(next));

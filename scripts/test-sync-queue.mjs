@@ -243,4 +243,98 @@ assert.equal(isRetriableStatus(401), true);
 assert.equal(isRetriableStatus(403), true);
 assert.equal(isRetriableStatus(400), false);
 
+// Downloaded: last op per video wins, like Done
+assert.deepEqual(
+  compactActions([
+    act("downloaded", { type: "downloaded", id: A }, "d1"),
+    act("downloaded", { type: "undownloaded", id: A }, "d2"),
+    act("downloaded", { type: "downloaded", id: B }, "d3"),
+    act("downloaded", { type: "downloaded", id: A }, "d4"),
+  ]).map((item) => [item.op.type, item.op.id]),
+  [
+    ["downloaded", B],
+    ["downloaded", A],
+  ],
+);
+assert.deepEqual(
+  compactActions([
+    act("downloaded", { type: "downloaded", id: A }, "d1"),
+    act("downloaded", { type: "undownloaded", id: A }, "d2"),
+  ]).map((item) => item.op.type),
+  ["undownloaded"],
+);
+
+// Downloaded and Done keep relative order after compacting each kind
+assert.deepEqual(
+  compactActions([
+    act("downloaded", { type: "downloaded", id: A }, "1"),
+    act("done", { type: "done", id: A }, "2"),
+    act("downloaded", { type: "undownloaded", id: A }, "3"),
+  ]).map((item) => [item.kind, item.op.type]),
+  [
+    ["done", "done"],
+    ["downloaded", "undownloaded"],
+  ],
+);
+
+const dlQueued = enqueueAction([], { kind: "downloaded", op: { type: "downloaded", id: A } }, T);
+assert.equal(dlQueued.length, 1);
+assert.equal(dlQueued[0].kind, "downloaded");
+assert.deepEqual(
+  enqueueAction(dlQueued, { kind: "downloaded", op: { type: "undownloaded", id: A }, clientId: "dx" }, T).map(
+    (item) => [item.clientId, item.op.type],
+  ),
+  [["dx", "undownloaded"]],
+);
+
+// flush: compacting downloaded+undownloaded+downloaded is one call
+{
+  const sent = [];
+  const result = await flushActions(
+    [
+      act("downloaded", { type: "downloaded", id: A }, "1"),
+      act("downloaded", { type: "undownloaded", id: A }, "2"),
+      act("downloaded", { type: "downloaded", id: A }, "3"),
+    ],
+    {
+      sendDone: async () => ({}),
+      sendQueue: async () => ({}),
+      sendDownloaded: async (op) => {
+        sent.push(op.type);
+        return { ids: [A] };
+      },
+    },
+  );
+  assert.deepEqual(sent, ["downloaded"]);
+  assert.equal(result.sent, 1);
+  assert.deepEqual(result.remaining, []);
+  assert.deepEqual(result.results.downloaded, { ids: [A] });
+}
+
+// flush: a retriable downloaded error keeps later ops
+{
+  const boom = Object.assign(new Error("Network error"), { retriable: true });
+  const result = await flushActions(
+    [
+      act("downloaded", { type: "downloaded", id: A }, "1"),
+      act("done", { type: "done", id: B }, "2"),
+    ],
+    {
+      sendDone: async () => {
+        throw new Error("should not be called");
+      },
+      sendQueue: async () => ({}),
+      sendDownloaded: async () => {
+        throw boom;
+      },
+    },
+  );
+  assert.equal(result.sent, 0);
+  assert.equal(result.error, boom);
+  assert.deepEqual(
+    result.remaining.map((item) => item.kind),
+    ["downloaded", "done"],
+  );
+}
+
 console.log("test-sync-queue: ok");

@@ -929,6 +929,7 @@ p {
 }
 
 .view-tab {
+  flex: 1 1 0;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -992,6 +993,7 @@ p {
 .star-btn,
 .done-btn,
 .yt-btn,
+.dl-btn,
 .move-btn,
 .drag-handle {
   display: inline-flex;
@@ -1011,6 +1013,7 @@ p {
 .star-btn:hover:not(:disabled),
 .done-btn:hover:not(:disabled),
 .yt-btn:hover:not(:disabled),
+.dl-btn:hover:not(:disabled),
 .move-btn:hover:not(:disabled),
 .drag-handle:hover {
   color: var(--text);
@@ -1025,6 +1028,14 @@ p {
   color: var(--almost);
 }
 
+.dl-btn.is-on {
+  color: var(--barely);
+}
+
+.status-pill.downloaded-mark {
+  color: var(--barely);
+}
+
 .status-pill.marked-done {
   color: var(--almost);
 }
@@ -1032,6 +1043,7 @@ p {
 .star-btn:disabled,
 .done-btn:disabled,
 .yt-btn:disabled,
+.dl-btn:disabled,
 .move-btn:disabled {
   opacity: 0.35;
   cursor: default;
@@ -1124,6 +1136,7 @@ p {
 
 @media (max-width: 860px) {
   .view-tab {
+  flex: 1 1 0;
     min-height: 40px;
   }
 
@@ -1160,6 +1173,7 @@ p {
   .star-btn,
   .done-btn,
   .yt-btn,
+  .dl-btn,
   .move-btn {
     min-width: 44px;
     min-height: 44px;
@@ -1200,7 +1214,8 @@ p {
   .queue-actions .move-btn,
   .queue-actions .done-btn,
   .queue-actions .star-btn,
-  .queue-actions .yt-btn {
+  .queue-actions .yt-btn,
+  .queue-actions .dl-btn {
     flex: 1 1 0;
     min-height: 44px;
     background: #17171d;

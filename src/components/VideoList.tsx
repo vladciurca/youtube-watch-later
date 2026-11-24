@@ -1,6 +1,6 @@
 import type { Video } from "../types";
 import { VideoRow } from "./VideoRow";
-import type { DoneControls, QueueControls } from "./VideoRow";
+import type { DoneControls, DownloadedControls, QueueControls } from "./VideoRow";
 
 interface VideoListProps {
   videos: Video[];
@@ -8,6 +8,10 @@ interface VideoListProps {
   error: string | null;
   onReset: () => void;
   done?: DoneControls;
+  downloaded?: DownloadedControls;
+  emptyTitle?: string;
+  emptyDetail?: string;
+  hideReset?: boolean;
   queue?: {
     available: boolean;
     ids: Set<string>;
@@ -15,7 +19,7 @@ interface VideoListProps {
   };
 }
 
-export function VideoList({ videos, loading, error, onReset, queue, done }: VideoListProps) {
+export function VideoList({ videos, loading, error, onReset, queue, done, downloaded, emptyTitle, emptyDetail, hideReset }: VideoListProps) {
   if (loading) {
     return (
       <div className="list" aria-busy="true">
@@ -38,10 +42,13 @@ export function VideoList({ videos, loading, error, onReset, queue, done }: Vide
   if (videos.length === 0) {
     return (
       <div className="empty-state">
-        <p>No videos match these filters.</p>
-        <button type="button" className="reset-btn" onClick={onReset}>
-          Reset filters
-        </button>
+        <p>{emptyTitle ?? "No videos match these filters."}</p>
+        {emptyDetail ? <p className="empty-detail">{emptyDetail}</p> : null}
+        {hideReset ? null : (
+          <button type="button" className="reset-btn" onClick={onReset}>
+            Reset filters
+          </button>
+        )}
       </div>
     );
   }
@@ -53,6 +60,7 @@ export function VideoList({ videos, loading, error, onReset, queue, done }: Vide
           key={video.id}
           video={video}
           done={done}
+          downloaded={downloaded}
           queue={
             queue
               ? {

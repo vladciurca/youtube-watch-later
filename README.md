@@ -103,6 +103,15 @@ npm run preview
 
 Click a row to open `https://www.youtube.com/watch?v={id}&t={t}s` in a new tab. That click does not change `watchedPct` or `status`. Every row also has an **Open in YouTube** button: on iPhone it uses the `youtube://` app scheme so the YouTube app opens (for Premium offline downloads); if the app is missing it falls back to the same https resume link.
 
+## Downloaded
+
+YouTube does not expose which videos were downloaded in the app, so each row has a **Downloaded** toggle next to **Open in YouTube**. Tap it after you download a video with YouTube Premium. A small **Downloaded** badge appears on the row, and the **Downloaded** tab lists only those videos. The library still opens on **All** with no filters.
+
+- Stored server-side in its own private Blob, `watch-later/downloaded.json`, via `/api/downloaded` (GET list, POST `{ op: { type: "downloaded" | "undownloaded", id } }`). A library sync never writes this blob, so the marks survive across devices and syncs. Offline taps go through the same IndexedDB queue as Done and Queue, and flush when you are back online.
+- When a video becomes **Done** (watched 95% or more, or marked done by hand), the Downloaded mark is cleared automatically, both in the app and on the server.
+- Done videos cannot be marked downloaded.
+
+
 ## Queue
 
 A star on every row adds or removes a video from the **Queue**. The **Queue** tab (with a count) shows only queued videos in queue order; the app still opens on **All** with no filters. Reorder by dragging the handle (works by touch), or use the move-to-top / up / down buttons. Filters and sort do not apply inside the Queue.

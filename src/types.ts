@@ -51,6 +51,9 @@ export interface Video {
   droppedAt: string | null;
   /** Set client-side when the video is explicitly marked Done (server override). */
   markedDone?: boolean;
+  /** Set client-side when the video is marked Downloaded (server list). */
+  downloaded?: boolean;
+  downloadedAt?: string | null;
   /** 0 = top of YouTube Watch Later. Absent only on the unsynced seed. */
   savedRank?: number | null;
   /** ISO timestamp parsed from YouTube's relative published string at scrape time. */

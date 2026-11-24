@@ -1,12 +1,17 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { applyDoneOverrides, normalizeDone } from "./done.mjs";
+import {
+  normalizeDownloaded,
+  pruneDoneFromDownloaded,
+} from "./downloaded.mjs";
 import { normalizeQueue, pruneDoneFromQueue } from "./queue.mjs";
 
 const BLOB_PATH = "watch-later/library.json";
 const BLOB_PREFIX = "watch-later/";
 const QUEUE_PATH = "watch-later/queue.json";
 const DONE_PATH = "watch-later/done.json";
+const DOWNLOADED_PATH = "watch-later/downloaded.json";
 
 // Private Blob stores reject access:"public" puts, and blob URLs are not
 // anonymously fetchable. Authenticate list/put/get with BLOB_READ_WRITE_TOKEN.
@@ -213,6 +218,45 @@ export async function pruneQueueForLibrary(videos, sdkOverride) {
     const { queue, removed } = pruneDoneFromQueue(current, effective);
     if (removed.length > 0) await saveQueue(queue, sdkOverride);
     return { queue, removed };
+  } catch {
+    return null;
+  }
+}
+
+export async function loadDownloaded(sdkOverride) {
+  const token = blobToken();
+  if (!token) throw new Error("BLOB_READ_WRITE_TOKEN is not configured");
+  const sdk = await blobSdk(sdkOverride);
+  return normalizeDownloaded(await readPrivateJson(sdk, DOWNLOADED_PATH, token));
+}
+
+export async function saveDownloaded(list, sdkOverride) {
+  const token = blobToken();
+  if (!token) throw new Error("BLOB_READ_WRITE_TOKEN is not configured");
+  const sdk = await blobSdk(sdkOverride);
+  return sdk.put(DOWNLOADED_PATH, JSON.stringify(normalizeDownloaded(list)), {
+    access: "private",
+    token,
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    contentType: "application/json",
+    cacheControlMaxAge: 0,
+  });
+}
+
+// Clear Downloaded marks on videos that are now Done (progress or explicit).
+export async function pruneDownloadedForLibrary(videos, sdkOverride) {
+  try {
+    const current = await loadDownloaded(sdkOverride);
+    let effective = videos;
+    try {
+      effective = applyDoneOverrides(videos, await loadDone(sdkOverride));
+    } catch {
+      // progress-based Done only
+    }
+    const { list, removed } = pruneDoneFromDownloaded(current, effective);
+    if (removed.length > 0) await saveDownloaded(list, sdkOverride);
+    return { list, removed };
   } catch {
     return null;
   }
