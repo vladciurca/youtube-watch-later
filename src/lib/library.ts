@@ -45,7 +45,7 @@ export function activeFilterCount(filters: LibraryFilters): number {
   return filters.statuses.length + filters.categories.length + dropped + query;
 }
 
-export function youtubeResumeUrl(video: Video): string {
+export function youtubeResumeUrl(video: Pick<Video, "id" | "t">): string {
   return `https://www.youtube.com/watch?v=${video.id}&t=${video.t}s`;
 }
 

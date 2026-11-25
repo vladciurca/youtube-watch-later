@@ -9,6 +9,7 @@ import {
   activeFilterCount,
   categoryCounts,
   filterAndSortVideos,
+  isDone,
   withDerivedStatus,
   statusCounts,
 } from "./lib/library";
@@ -25,13 +26,23 @@ import type { Queue, QueueOp } from "./lib/queue";
 import { applyDoneOp, applyDoneOverrides, emptyDone, fetchDone, sendDoneOp } from "./lib/done";
 import type { DoneList, DoneOp } from "./lib/done";
 import {
+  applyDownloadedMarks,
+  applyDownloadedOp,
+  emptyDownloaded,
+  fetchDownloaded,
+  sendDownloadedOp,
+} from "./lib/downloaded";
+import type { DownloadedList, DownloadedOp } from "./lib/downloaded";
+import {
   enqueuePendingAction,
   flushPendingActions,
   pendingActionCount,
   readDoneCache,
+  readDownloadedCache,
   readLibraryCache,
   readQueueCache,
   writeDoneCache,
+  writeDownloadedCache,
   writeLibraryCache,
   writeQueueCache,
 } from "./lib/offline-store";
@@ -71,6 +82,11 @@ export default function App() {
   const [queueNotice, setQueueNotice] = useState<string | null>(null);
   const queueRef = useRef<Queue>(queue);
   const queueEpoch = useRef(0);
+  const [downloadedList, setDownloadedList] = useState<DownloadedList>(emptyDownloaded);
+  const [downloadedReady, setDownloadedReady] = useState(false);
+  const [downloadedAvailable, setDownloadedAvailable] = useState(true);
+  const downloadedRef = useRef<DownloadedList>(downloadedList);
+  const downloadedEpoch = useRef(0);
   const [offline, setOffline] = useState(
     typeof navigator !== "undefined" ? navigator.onLine === false : false,
   );
@@ -90,6 +106,11 @@ export default function App() {
     setDoneList(next);
   }, []);
 
+  const commitDownloaded = useCallback((next: DownloadedList) => {
+    downloadedRef.current = next;
+    setDownloadedList(next);
+  }, []);
+
   const runFlush = useCallback(async () => {
     if (flushing.current) {
       flushAgain.current = true;
@@ -102,6 +123,7 @@ export default function App() {
         const result = await flushPendingActions({
           sendDone: (op) => sendDoneOp(op as DoneOp),
           sendQueue: (op) => sendQueueOp(op as QueueOp),
+          sendDownloaded: (op) => sendDownloadedOp(op as DownloadedOp),
         });
         pendingRef.current = result.remaining.length;
         setPendingCount(result.remaining.length);
@@ -118,6 +140,12 @@ export default function App() {
             commitQueue(saved);
             await writeQueueCache(saved);
           }
+          if (result.results.downloaded) {
+            const saved = result.results.downloaded as DownloadedList;
+            downloadedEpoch.current += 1;
+            commitDownloaded(saved);
+            await writeDownloadedCache(saved);
+          }
           setQueueNotice(null);
         } else if (result.error && typeof navigator !== "undefined" && navigator.onLine) {
           setQueueNotice(
@@ -131,7 +159,7 @@ export default function App() {
       pendingRef.current = pending;
       setPendingCount(pending);
     }
-  }, [commitDone, commitQueue]);
+  }, [commitDone, commitQueue, commitDownloaded]);
 
   const loadQueue = useCallback(async () => {
     if (pendingRef.current > 0) return;
@@ -152,7 +180,7 @@ export default function App() {
   }, [commitQueue]);
 
   const enqueueOp = useCallback(
-    async (kind: "done" | "queue", op: object) => {
+    async (kind: "done" | "queue" | "downloaded", op: object) => {
       const next = await enqueuePendingAction({ kind, op });
       pendingRef.current = next.length;
       setPendingCount(next.length);
@@ -172,8 +200,12 @@ export default function App() {
   );
 
   const videos = useMemo(
-    () => withDerivedStatus(applyDoneOverrides(rawVideos, doneList)),
-    [rawVideos, doneList],
+    () =>
+      applyDownloadedMarks(
+        withDerivedStatus(applyDoneOverrides(rawVideos, doneList)),
+        downloadedList,
+      ),
+    [rawVideos, doneList, downloadedList],
   );
 
   const loadDoneList = useCallback(async () => {
@@ -208,6 +240,44 @@ export default function App() {
       mutateDone({ type: manual ? "undone" : "done", id: video.id });
     },
     [mutateDone],
+  );
+
+  const loadDownloadedList = useCallback(async () => {
+    if (pendingRef.current > 0) return;
+    const epoch = downloadedEpoch.current;
+    try {
+      const next = await fetchDownloaded();
+      if (pendingRef.current > 0 || epoch !== downloadedEpoch.current) return;
+      commitDownloaded(next);
+      await writeDownloadedCache(next);
+      setDownloadedAvailable(true);
+    } catch {
+      const cached = await readDownloadedCache();
+      if (cached && pendingRef.current === 0 && epoch === downloadedEpoch.current) {
+        commitDownloaded(cached);
+      }
+      setDownloadedAvailable(true);
+    } finally {
+      setDownloadedReady(true);
+    }
+  }, [commitDownloaded]);
+
+  const mutateDownloaded = useCallback(
+    (op: DownloadedOp) => {
+      downloadedEpoch.current += 1;
+      commitDownloaded(applyDownloadedOp(downloadedRef.current, op));
+      setQueueNotice(null);
+      void enqueueOp("downloaded", op);
+    },
+    [commitDownloaded, enqueueOp],
+  );
+
+  const toggleDownloaded = useCallback(
+    (video: Video) => {
+      const marked = downloadedRef.current.items.some((item) => item.id === video.id);
+      mutateDownloaded({ type: marked ? "undownloaded" : "downloaded", id: video.id });
+    },
+    [mutateDownloaded],
   );
 
   const loadLibrary = useCallback(async () => {
@@ -266,6 +336,7 @@ export default function App() {
       if (document.visibilityState === "visible") {
         void loadQueue();
         void loadDoneList();
+        void loadDownloadedList();
         if (typeof navigator === "undefined" || navigator.onLine) void runFlush();
       }
     };
@@ -275,6 +346,7 @@ export default function App() {
         void loadLibrary();
         void loadQueue();
         void loadDoneList();
+        void loadDownloadedList();
       });
     };
     const onOffline = () => setOffline(true);
@@ -288,17 +360,18 @@ export default function App() {
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
     };
-  }, [loadQueue, loadDoneList, loadLibrary, runFlush]);
+  }, [loadQueue, loadDoneList, loadDownloadedList, loadLibrary, runFlush]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function boot() {
       try {
-        const [cachedLib, cachedDone, cachedQueue, pending] = await Promise.all([
+        const [cachedLib, cachedDone, cachedQueue, cachedDownloaded, pending] = await Promise.all([
           readLibraryCache(),
           readDoneCache(),
           readQueueCache(),
+          readDownloadedCache(),
           pendingActionCount(),
         ]);
         if (cancelled) return;
@@ -308,6 +381,10 @@ export default function App() {
         if (cachedQueue) {
           commitQueue(cachedQueue);
           setQueueReady(true);
+        }
+        if (cachedDownloaded) {
+          commitDownloaded(cachedDownloaded);
+          setDownloadedReady(true);
         }
         if (cachedLib) {
           setVideos(cachedLib.library.videos);
@@ -323,6 +400,7 @@ export default function App() {
         if (cancelled) return;
         void loadQueue();
         void loadDoneList();
+        void loadDownloadedList();
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "Unknown error");
@@ -335,7 +413,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [commitDone, commitQueue, loadLibrary, loadQueue, loadDoneList, runFlush]);
+  }, [commitDone, commitQueue, commitDownloaded, loadLibrary, loadQueue, loadDoneList, loadDownloadedList, runFlush]);
 
   const ids = useMemo(() => queueIds(queue), [queue]);
   const idSet = useMemo(() => new Set(ids), [ids]);
@@ -352,6 +430,21 @@ export default function App() {
     if (!queueReady) return;
     for (const id of queuedDone) mutateQueue({ type: "remove", id });
   }, [queueReady, queuedDone, mutateQueue]);
+
+  const downloadedVideos = useMemo(
+    () => videos.filter((video) => video.downloaded),
+    [videos],
+  );
+  // Downloaded marks clear once a video is Done (95%+ or explicit), same as the server.
+  const downloadedDone = useMemo(() => {
+    if (videos.length === 0) return [];
+    const doneIds = new Set(videos.filter((video) => isDone(video)).map((video) => video.id));
+    return downloadedList.items.filter((item) => doneIds.has(item.id)).map((item) => item.id);
+  }, [videos, downloadedList]);
+  useEffect(() => {
+    if (!downloadedReady) return;
+    for (const id of downloadedDone) mutateDownloaded({ type: "undownloaded", id });
+  }, [downloadedReady, downloadedDone, mutateDownloaded]);
 
   const toggleQueue = useCallback(
     (video: Video) => {
@@ -380,6 +473,11 @@ export default function App() {
   );
 
   const visible = useMemo(() => filterAndSortVideos(videos, filters), [videos, filters]);
+  const downloadedVisible = useMemo(
+    () => filterAndSortVideos(downloadedVideos, filters),
+    [downloadedVideos, filters],
+  );
+  const listVideos = view === "downloaded" ? downloadedVisible : visible;
 
   const counts = useMemo(
     () =>
@@ -417,6 +515,7 @@ export default function App() {
     setLoading(true);
     void loadQueue();
     void loadDoneList();
+    void loadDownloadedList();
     if (typeof navigator === "undefined" || navigator.onLine) void runFlush();
     try {
       await loadLibrary();
@@ -425,7 +524,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [loadLibrary, loadQueue, loadDoneList, runFlush]);
+  }, [loadLibrary, loadQueue, loadDoneList, loadDownloadedList, runFlush]);
 
   const bannerTime = cachedAt ? formatCachedAt(cachedAt) : null;
   const pendingText =
@@ -446,7 +545,7 @@ export default function App() {
         filters={filters}
         counts={counts}
         categoryCounts={topicCounts}
-        resultCount={visible.length}
+        resultCount={listVideos.length}
         onSelectStatus={selectStatus}
         live={live}
         onToggleDropped={() =>
@@ -460,7 +559,9 @@ export default function App() {
       />
       <div className="main">
         <Header
-          matchCount={loading ? null : view === "queue" ? queued.length : visible.length}
+          matchCount={
+            loading ? null : view === "queue" ? queued.length : listVideos.length
+          }
           totalCount={videos.length}
           source={source}
           syncedAt={syncedAt}
@@ -475,6 +576,7 @@ export default function App() {
           onRefresh={() => void refreshLibrary()}
           view={view}
           queueCount={queueReady && !loading ? queued.length : null}
+          downloadedCount={downloadedReady && !loading ? downloadedVideos.length : null}
           onViewChange={(next) => {
             setView(next);
             setFiltersOpen(false);
@@ -503,17 +605,28 @@ export default function App() {
             available={queueAvailable}
             onToggle={toggleQueue}
             done={{ available: doneAvailable, onToggle: toggleDone }}
+            downloaded={{ available: downloadedAvailable, onToggle: toggleDownloaded }}
             onMove={moveInQueue}
             onReorder={reorderQueue}
           />
         ) : (
           <VideoList
-            videos={visible}
-            loading={loading}
+            videos={listVideos}
+            loading={loading || (view === "downloaded" && !downloadedReady)}
             error={error}
             onReset={resetFilters}
             done={{ available: doneAvailable, onToggle: toggleDone }}
+            downloaded={{ available: downloadedAvailable, onToggle: toggleDownloaded }}
             queue={{ available: queueAvailable, ids: idSet, onToggle: toggleQueue }}
+            emptyTitle={
+              view === "downloaded" ? "No downloaded videos yet." : undefined
+            }
+            emptyDetail={
+              view === "downloaded"
+                ? "After you download a video in the YouTube app, tap the download button on its row."
+                : undefined
+            }
+            hideReset={view === "downloaded" && activeFilterCount(filters) === 0}
           />
         )}
       </div>

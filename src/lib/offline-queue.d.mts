@@ -1,4 +1,4 @@
-export type ActionKind = "done" | "queue";
+export type ActionKind = "done" | "queue" | "downloaded";
 
 export interface PendingAction {
   clientId: string;
@@ -20,10 +20,11 @@ export function flushActions(
   senders: {
     sendDone: (op: object) => Promise<unknown>;
     sendQueue: (op: object) => Promise<unknown>;
+    sendDownloaded?: (op: object) => Promise<unknown>;
   },
 ): Promise<{
   remaining: PendingAction[];
   sent: number;
-  results: { done?: unknown; queue?: unknown };
+  results: { done?: unknown; queue?: unknown; downloaded?: unknown };
   error?: unknown;
 }>;

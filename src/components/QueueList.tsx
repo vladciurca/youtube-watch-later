@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import type { Video } from "../types";
-import { DoneButton, OpenInYouTubeButton, StarButton, VideoRow } from "./VideoRow";
-import type { DoneControls, QueueControls } from "./VideoRow";
+import { DoneButton, DownloadedButton, StarButton, VideoRow } from "./VideoRow";
+import type { DoneControls, DownloadedControls, QueueControls } from "./VideoRow";
 
 interface QueueListProps {
   videos: Video[];
@@ -11,6 +11,7 @@ interface QueueListProps {
   available: boolean;
   onToggle: (video: Video) => void;
   done: DoneControls;
+  downloaded: DownloadedControls;
   onMove: (id: string, type: "top" | "up" | "down") => void;
   onReorder: (id: string, insertIndex: number) => void;
 }
@@ -145,6 +146,7 @@ export function QueueList({
   available,
   onToggle,
   done,
+  downloaded,
   onMove,
   onReorder,
 }: QueueListProps) {
@@ -298,7 +300,7 @@ export function QueueList({
             />
             <VideoRow video={video} bare />
             <div className="row-actions queue-actions">
-              <OpenInYouTubeButton video={video} />
+              <DownloadedButton video={video} downloaded={downloaded} />
               <button
                 type="button"
                 className="move-btn"

@@ -1,4 +1,5 @@
 import type { DoneList } from "./done";
+import type { DownloadedList } from "./downloaded";
 import type { Queue } from "./queue";
 import type { VideoLibrary } from "../types";
 import {
@@ -14,6 +15,7 @@ const KV = "kv";
 const LIBRARY_KEY = "library";
 const DONE_KEY = "done";
 const QUEUE_KEY = "queue";
+const DOWNLOADED_KEY = "downloaded";
 const ACTIONS_KEY = "actions";
 
 export interface CachedLibrary {
@@ -85,6 +87,14 @@ export async function writeQueueCache(queue: Queue) {
   await kvSet(QUEUE_KEY, queue);
 }
 
+export async function readDownloadedCache(): Promise<DownloadedList | null> {
+  return kvGet<DownloadedList>(DOWNLOADED_KEY);
+}
+
+export async function writeDownloadedCache(list: DownloadedList) {
+  await kvSet(DOWNLOADED_KEY, list);
+}
+
 export async function readPendingActions(): Promise<PendingAction[]> {
   const value = await kvGet<PendingAction[]>(ACTIONS_KEY);
   return compactActions(Array.isArray(value) ? value : []);
@@ -105,6 +115,7 @@ export async function enqueuePendingAction(
 export async function flushPendingActions(senders: {
   sendDone: (op: object) => Promise<unknown>;
   sendQueue: (op: object) => Promise<unknown>;
+  sendDownloaded?: (op: object) => Promise<unknown>;
 }) {
   const current = await readPendingActions();
   if (current.length === 0) {

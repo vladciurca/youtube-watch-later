@@ -11,6 +11,9 @@
     },
     "api/done.js": {
       "includeFiles": "public/data/videos.json"
+    },
+    "api/downloaded.js": {
+      "includeFiles": "public/data/videos.json"
     }
   },
   "headers": [

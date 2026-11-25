@@ -1,5 +1,5 @@
-/* Watch Later offline cache: app shell, last library/done/queue responses, thumbnails. */
-const VERSION = "wl-offline-v1";
+/* Watch Later offline cache: app shell, last library/done/queue/downloaded responses, thumbnails. */
+const VERSION = "wl-offline-v3";
 const SHELL = `${VERSION}-shell`;
 const DATA = `${VERSION}-data`;
 const THUMBS = `${VERSION}-thumbs`;
@@ -17,7 +17,7 @@ const PRECACHE = [
   "/data/videos.json",
 ];
 
-const DATA_PATHS = new Set(["/api/library", "/api/done", "/api/queue", "/data/videos.json"]);
+const DATA_PATHS = new Set(["/api/library", "/api/done", "/api/queue", "/api/downloaded", "/data/videos.json"]);
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

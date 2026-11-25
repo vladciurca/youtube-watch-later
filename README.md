@@ -101,7 +101,16 @@ npm run preview
 - No filters: every video shows on load, including Done and Dropped. Status and category chips start unselected (single-select chips; click one to filter, click the selected chip to show all again). The search box starts empty and the Dropped toggle starts off, which does not hide dropped videos while no status is selected.
 - Sort: **Saved** — YouTube Watch Later order (`savedRank` 0 is the top of the list). Until the first sync, the seed has no rank and **Saved** keeps the seed's order. **Remaining** sorts least leftover time among unfinished videos first, Done / 100% last. Leftover under an hour shows `M:SS` (e.g. `6:00 left`); hours stay `1h 4m left`. **Published** sorts newest upload first, missing dates last. **Watched %** still sorts highest `watchedPct` first
 
-Click a row to open `https://www.youtube.com/watch?v={id}&t={t}s` in a new tab. That click does not change `watchedPct` or `status`. Every row also has an **Open in YouTube** button: on iPhone it uses the `youtube://` app scheme so the YouTube app opens (for Premium offline downloads); if the app is missing it falls back to the same https resume link.
+Click the thumbnail or title to open the video. That click does not change `watchedPct` or `status`. On desktop, the row is the same https resume link as before (`https://www.youtube.com/watch?v={id}&t={t}s`) and opens in a new tab. On iPhone and iPad it uses `youtube://www.youtube.com/watch?v={id}` (with `&t=` when there is a resume time) so the YouTube app opens; if the app does not open, it falls back to the same https resume link.
+
+## Downloaded
+
+YouTube does not expose which videos were downloaded in the app, so each row has a **Downloaded** toggle. Tap it after you download a video with YouTube Premium. A small **Downloaded** badge appears on the row, and the **Downloaded** tab lists only those videos. The library still opens on **All** with no filters.
+
+- Stored server-side in its own private Blob, `watch-later/downloaded.json`, via `/api/downloaded` (GET list, POST `{ op: { type: "downloaded" | "undownloaded", id } }`). A library sync never writes this blob, so the marks survive across devices and syncs. Offline taps go through the same IndexedDB queue as Done and Queue, and flush when you are back online.
+- When a video becomes **Done** (watched 95% or more, or marked done by hand), the Downloaded mark is cleared automatically, both in the app and on the server.
+- Done videos cannot be marked downloaded.
+
 
 ## Queue
 
@@ -123,7 +132,7 @@ On iPhone:
 1. Open the site in Safari while online and wait for the list to appear.
 2. Share → **Add to Home Screen**. Home Screen is what keeps the cache around; Safari may evict site data for a page you only visit in the tab switcher.
 3. Open the home-screen icon later, including in airplane mode. An **Offline, showing saved list from …** banner appears when there is no connection.
-4. Use **Open in YouTube** on a video to open it in the YouTube app and download it there with Premium.
+4. Tap a video's thumbnail or title to open it in the YouTube app, then download it there with Premium.
 
 iOS notes: service workers work in Safari and in home-screen PWAs. Storage can still be evicted under memory pressure, especially if the app was never added to the Home Screen. Playing a video still needs a network or a YouTube Premium download in the YouTube app; this app does not store the videos themselves.
 

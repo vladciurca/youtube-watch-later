@@ -1,7 +1,7 @@
 import type { LibraryFilters, SortKey } from "../types";
 import { SORT_OPTIONS } from "../lib/library";
 
-export type LibraryView = "all" | "queue";
+export type LibraryView = "all" | "queue" | "downloaded";
 
 interface HeaderProps {
   matchCount: number | null;
@@ -19,6 +19,7 @@ interface HeaderProps {
   onRefresh: () => void;
   view: LibraryView;
   queueCount: number | null;
+  downloadedCount: number | null;
   onViewChange: (view: LibraryView) => void;
 }
 
@@ -54,6 +55,7 @@ export function Header({
   onRefresh,
   view,
   queueCount,
+  downloadedCount,
   onViewChange,
 }: HeaderProps) {
   const stale = isStale(syncedAt, live);
@@ -93,6 +95,16 @@ export function Header({
         >
           Queue
           <span className="tab-count">{queueCount ?? "—"}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === "downloaded"}
+          className={`view-tab${view === "downloaded" ? " is-on" : ""}`}
+          onClick={() => onViewChange("downloaded")}
+        >
+          Downloaded
+          <span className="tab-count">{downloadedCount ?? "—"}</span>
         </button>
       </div>
       <div className="mobile-tools">
@@ -141,6 +153,8 @@ export function Header({
             <strong>{matchCount === null ? "—" : matchCount}</strong>
             {view === "queue" ? (
               <span> queued</span>
+            ) : view === "downloaded" ? (
+              <span> downloaded</span>
             ) : (
               <span> of {totalCount || "—"}</span>
             )}

@@ -4,9 +4,8 @@ import {
   isDone,
   publishedDisplay,
   thumbnailUrl,
-  youtubeResumeUrl,
 } from "../lib/library";
-import { openInYouTube } from "../lib/youtube-app";
+import { isIOS, openYouTubeFromRow, youtubeOpenHref } from "../lib/youtube-app";
 
 export interface QueueControls {
   /** False when the queue backend could not be reached. */
@@ -21,10 +20,16 @@ export interface DoneControls {
   onToggle: (video: Video) => void;
 }
 
+export interface DownloadedControls {
+  available: boolean;
+  onToggle: (video: Video) => void;
+}
+
 interface VideoRowProps {
   video: Video;
   queue?: QueueControls;
   done?: DoneControls;
+  downloaded?: DownloadedControls;
   /** Render only the video link; QueueList supplies its own toolbar. */
   bare?: boolean;
 }
@@ -76,29 +81,6 @@ export function StarButton({
 }
 
 
-export function OpenInYouTubeButton({ video }: { video: Video }) {
-  return (
-    <button
-      type="button"
-      className="yt-btn"
-      aria-label="Open in YouTube"
-      title="Open in YouTube"
-      onClick={() => openInYouTube(video)}
-    >
-      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-        <path
-          d="M21.6 7.2a3 3 0 0 0-2.1-2.1C17.7 4.7 12 4.7 12 4.7s-5.7 0-7.5.4A3 3 0 0 0 2.4 7.2 31 31 0 0 0 2 12a31 31 0 0 0 .4 4.8 3 3 0 0 0 2.1 2.1c1.8.4 7.5.4 7.5.4s5.7 0 7.5-.4a3 3 0 0 0 2.1-2.1A31 31 0 0 0 22 12a31 31 0 0 0-.4-4.8z"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.7"
-          strokeLinejoin="round"
-        />
-        <path d="M10 9.3v5.4l5.1-2.7z" fill="currentColor" />
-      </svg>
-    </button>
-  );
-}
-
 export function DoneButton({ video, done }: { video: Video; done: DoneControls }) {
   const finished = isDone(video);
   const manual = video.markedDone === true;
@@ -142,16 +124,74 @@ export function DoneButton({ video, done }: { video: Video; done: DoneControls }
   );
 }
 
-export function VideoRow({ video, queue, done, bare }: VideoRowProps) {
+
+export function DownloadedButton({
+  video,
+  downloaded,
+}: {
+  video: Video;
+  downloaded: DownloadedControls;
+}) {
+  const marked = video.downloaded === true;
+  const finished = isDone(video);
+  const label = marked ? "Mark not downloaded" : "Mark downloaded";
+  const title = !downloaded.available
+    ? "Saving is unavailable right now"
+    : finished
+      ? "Done videos are not kept as downloaded"
+      : label;
+  return (
+    <button
+      type="button"
+      className={`dl-btn${marked ? " is-on" : ""}`}
+      aria-pressed={marked}
+      aria-label={finished ? "Done videos are not kept as downloaded" : label}
+      title={title}
+      disabled={!downloaded.available || finished}
+      onClick={() => downloaded.onToggle(video)}
+    >
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <path
+          d="M12 4v10.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        />
+        <path
+          d="M8.2 11.2L12 15l3.8-3.8"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M6 18h12"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        />
+      </svg>
+    </button>
+  );
+}
+
+export function VideoRow({ video, queue, done, downloaded, bare }: VideoRowProps) {
   const pct = Math.min(100, Math.max(0, video.watchedPct));
   const published = publishedDisplay(video);
 
+  const ios = isIOS();
   const row = (
     <a
       className="video-row"
-      href={youtubeResumeUrl(video)}
-      target="_blank"
-      rel="noopener noreferrer"
+      href={youtubeOpenHref(video)}
+      {...(ios
+        ? {
+            onClick: (event: { preventDefault: () => void }) => openYouTubeFromRow(event, video),
+          }
+        : { target: "_blank", rel: "noopener noreferrer" })}
     >
       <div className="thumb-wrap">
         <img
@@ -182,6 +222,11 @@ export function VideoRow({ video, queue, done, bare }: VideoRowProps) {
           <span className={`status-pill ${STATUS_CLASS[video.status]}`}>
             {video.status}
           </span>
+          {video.downloaded ? (
+            <span className="status-pill downloaded-mark" title="Downloaded in the YouTube app">
+              Downloaded
+            </span>
+          ) : null}
           {video.markedDone ? (
             <span className="status-pill marked-done">Marked done</span>
           ) : null}
@@ -216,7 +261,7 @@ export function VideoRow({ video, queue, done, bare }: VideoRowProps) {
     <div className="video-item">
       {row}
       <div className="row-actions">
-        <OpenInYouTubeButton video={video} />
+        {downloaded ? <DownloadedButton video={video} downloaded={downloaded} /> : null}
         {done ? <DoneButton video={video} done={done} /> : null}
         {queue ? <StarButton video={video} queue={queue} /> : null}
       </div>

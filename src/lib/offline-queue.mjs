@@ -3,7 +3,7 @@
 // here just avoids sending work that a later op has already superseded.
 
 /**
- * @typedef {'done' | 'queue'} ActionKind
+ * @typedef {'done' | 'queue' | 'downloaded'} ActionKind
  * @typedef {{ clientId: string, kind: ActionKind, op: object, queuedAt: string }} PendingAction
  */
 
@@ -36,22 +36,27 @@ function sameOp(a, b) {
 
 /**
  * Drop Done ops superseded by a later Done/undone on the same video, drop
- * Queue moves superseded by a later reorder, and drop exact consecutive
- * duplicates. Membership ops (add/remove) are kept in order so a later
- * reorder cannot resurrect a removed id on the server.
+ * Downloaded ops superseded by a later downloaded/undownloaded on the same
+ * video, drop Queue moves superseded by a later reorder, and drop exact
+ * consecutive duplicates. Membership ops (add/remove) are kept in order so
+ * a later reorder cannot resurrect a removed id on the server.
  *
  * @param {PendingAction[]} actions
  * @returns {PendingAction[]}
  */
 export function compactActions(actions) {
   if (!Array.isArray(actions) || actions.length === 0) return [];
-  const list = actions.filter((action) => action && (action.kind === "done" || action.kind === "queue"));
+  const list = actions.filter(
+    (action) => action && (action.kind === "done" || action.kind === "queue" || action.kind === "downloaded"),
+  );
 
   const lastDoneAt = new Map();
+  const lastDownloadedAt = new Map();
   let lastReorderAt = -1;
   for (let i = 0; i < list.length; i++) {
     const action = list[i];
     if (action.kind === "done" && action.op?.id) lastDoneAt.set(action.op.id, i);
+    if (action.kind === "downloaded" && action.op?.id) lastDownloadedAt.set(action.op.id, i);
     if (action.kind === "queue" && action.op?.type === "reorder") lastReorderAt = i;
   }
 
@@ -61,6 +66,9 @@ export function compactActions(actions) {
     if (action.kind === "done") {
       if (!action.op?.id) continue;
       if (lastDoneAt.get(action.op.id) !== i) continue;
+    } else if (action.kind === "downloaded") {
+      if (!action.op?.id) continue;
+      if (lastDownloadedAt.get(action.op.id) !== i) continue;
     } else if (action.op?.type === "top" || action.op?.type === "up" || action.op?.type === "down") {
       if (lastReorderAt > i) continue;
     } else if (action.op?.type === "reorder") {
@@ -83,7 +91,7 @@ export function compactActions(actions) {
  * @returns {PendingAction[]}
  */
 export function enqueueAction(actions, incoming, now = new Date().toISOString()) {
-  if (!incoming || (incoming.kind !== "done" && incoming.kind !== "queue") || !incoming.op) {
+  if (!incoming || (incoming.kind !== "done" && incoming.kind !== "queue" && incoming.kind !== "downloaded") || !incoming.op) {
     return compactActions(actions);
   }
   const action = {
@@ -101,7 +109,7 @@ export function enqueueAction(actions, incoming, now = new Date().toISOString())
  * failures (4xx other than 429) are dropped so they cannot block the queue.
  *
  * @param {PendingAction[]} actions
- * @param {{ sendDone: (op: object) => Promise<unknown>, sendQueue: (op: object) => Promise<unknown> }} senders
+ * @param {{ sendDone: (op: object) => Promise<unknown>, sendQueue: (op: object) => Promise<unknown>, sendDownloaded?: (op: object) => Promise<unknown> }} senders
  * @returns {Promise<{ remaining: PendingAction[], sent: number, results: { done?: unknown, queue?: unknown }, error?: unknown }>}
  */
 export async function flushActions(actions, senders) {
@@ -116,6 +124,11 @@ export async function flushActions(actions, senders) {
     try {
       if (action.kind === "done") {
         results.done = await senders.sendDone(action.op);
+      } else if (action.kind === "downloaded") {
+        if (typeof senders.sendDownloaded !== "function") {
+          throw Object.assign(new Error("Downloaded sync is unavailable"), { retriable: true });
+        }
+        results.downloaded = await senders.sendDownloaded(action.op);
       } else {
         results.queue = await senders.sendQueue(action.op);
       }
