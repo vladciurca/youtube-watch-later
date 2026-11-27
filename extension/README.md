@@ -47,6 +47,12 @@ The popup's **Automatic sync** block says, in this order:
 
 Those skipped checks are kept in `chrome.storage.local` under `autoSync` as `lastCheckAt` and `lastSkipReason`. The sync secret is handled exactly as before and is never shown. New permission in 1.5.0: `alarms`.
 
+### Update to 1.5.3 (Arc/Chrome on Mac)
+
+1. Unzip `extension/watch-later-sync.zip` over the folder the extension is loaded from (typically `~/Extensions/watch-later-sync`). Prefer the same folder so the Library URL and sync secret stay saved.
+2. Open `arc://extensions` (or `chrome://extensions`). Same folder: click reload on **Watch Later Sync**. New folder: remove the old one, **Load unpacked** the new folder, then re-enter the Library URL and the sync secret.
+3. Confirm the extensions page shows version **1.5.3**. Open the popup: the full width of the title, fields, and **Sync Watch Later** button should be visible, and the **Automatic sync** block should appear below the button without clipping. The popup and scrape/Done-step changes work with the current production library; sticky Done and treating a 709-of-724 exhausted scrape as complete need the matching site deploy (this PR) to be merged.
+
 ### Update to 1.5.2 (Arc/Chrome on Mac)
 
 1. Unzip `extension/watch-later-sync.zip` over the folder the extension is loaded from, or into a new folder.
@@ -73,7 +79,7 @@ Notes: Chrome does not load video in hidden background tabs, so a small real win
 
 ### Install / update (Mac, Chrome or Arc)
 
-1. Unzip `extension/watch-later-sync.zip` (or `watch-later-sync-1.4.0.zip`) to a folder you keep, for example `~/watch-later-sync`.
+1. Unzip `extension/watch-later-sync.zip` (or `watch-later-sync-1.4.0.zip`) to a folder you keep, for example `~/Extensions/watch-later-sync`.
 2. Open `chrome://extensions` (Arc: `arc://extensions`) and turn on **Developer mode**.
 3. If 1.3.0 is installed unpacked from another folder, click **Remove** on it first (or point **Load unpacked** at the new folder; reloading the old folder after overwriting its files also works).
 4. Click **Load unpacked** and pick the unzipped folder. The popup should show **Sync Done to YouTube** and `chrome://extensions` should list version 1.4.0. Your Library URL and sync secret are stored per install, so re-enter them if you removed the old copy.

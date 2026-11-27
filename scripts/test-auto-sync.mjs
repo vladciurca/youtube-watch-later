@@ -198,6 +198,10 @@ assert.match(describeLastRun(failAfterOk, NOW + 30 * H), /\(failed\)/);
 assert.equal(describeSyncResult({ scraped: 700, dropped: 3 }), "scraped 700, 3 marked Dropped");
 assert.match(describeSyncResult({ scraped: 40, partial: true }), /incomplete scrape \(40 videos\)/);
 assert.match(describeSyncResult({ scraped: 40, partial: true }), /does not count as a full sync/);
+assert.match(
+  describeSyncResult({ scraped: 709, statedCount: 724, partial: true }),
+  /incomplete scrape \(709 of 724 stated\)/,
+);
 
 // Every way a run can miss an accepted POST has its own sentence.
 assert.equal(hasSyncSecret(undefined), false);
@@ -263,7 +267,7 @@ assert.equal(describeDoneStep(null), "Done step did not run");
 
 // wiring in the extension
 const manifest = JSON.parse(ext("manifest.json"));
-assert.equal(manifest.version, "1.5.2");
+assert.equal(manifest.version, "1.5.3");
 assert.deepEqual(manifest.permissions, ["storage", "tabs", "scripting", "alarms"]);
 const bg = ext("background.js");
 assert.match(bg, /chrome\.alarms\.create\(AUTO_ALARM, \{ delayInMinutes: 5, periodInMinutes: 60 \}\)/);

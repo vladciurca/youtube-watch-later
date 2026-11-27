@@ -142,13 +142,28 @@ assert.deepEqual(queueIds(await loadQueue(sdk)), [C]);
   assert.equal(manual[0].status, "Done");
   assert.equal(manual[0].markedDone, true);
   assert.equal(isDoneVideo(manual[0]), true);
-  // a sync that leaves a video at 96% keeps it Done by progress; at 50% the manual mark still holds
+  // a sync that leaves a video at 96% keeps it Done by progress; a later 50%
+  // scrape must not un-Done it (accidental reopen on YouTube).
   const at96 = mergeWatchLaterLibrary([], [{ id: B, title: "B", author: "x", durationSec: 600, watchedPct: 96 }], T, {}).library.videos;
   assert.equal(at96[0].status, "Done");
   assert.equal(isDoneVideo(at96[0]), true);
   const at50 = mergeWatchLaterLibrary(at96, [{ id: B, title: "B", author: "x", durationSec: 600, watchedPct: 50 }], T, {}).library.videos;
-  assert.equal(isDoneVideo(at50[0]), false, "progress drives Done");
+  assert.equal(at50[0].watchedPct, 96);
+  assert.equal(isDoneVideo(at50[0]), true, "sticky Done survives a YouTube reset");
+  assert.equal(at50[0].needsYouTubeMarkWatched, true);
   assert.equal(isDoneVideo(applyDoneOverrides(at50, { items: [{ id: B }] })[0]), true, "manual override survives");
+  const at100 = mergeWatchLaterLibrary(at50, [{ id: B, title: "B", author: "x", durationSec: 600, watchedPct: 100 }], T, {}).library.videos;
+  assert.equal(at100[0].watchedPct, 100);
+  assert.ok(!("needsYouTubeMarkWatched" in at100[0]), "flag clears once YouTube is at 95%+ again");
+  // Below the threshold, progress still follows the scrape.
+  const mid = mergeWatchLaterLibrary(
+    [{ id: A, title: "A", author: "x", durationSec: 600, watchedPct: 40, droppedAt: null }],
+    [{ id: A, title: "A", author: "x", durationSec: 600, watchedPct: 12 }],
+    T,
+    {},
+  ).library.videos;
+  assert.equal(mid[0].watchedPct, 12);
+  assert.ok(!("needsYouTubeMarkWatched" in mid[0]));
 }
 
 // API handler guards

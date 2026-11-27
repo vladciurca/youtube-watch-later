@@ -7,8 +7,10 @@ import {
   DONE_THRESHOLD_PCT,
   finishJob,
   initialJob,
+  mergeRegressedIds,
   reasonLabel,
   recordResult,
+  regressedDoneIds,
   seekTarget,
   selectDoneToSync,
   summarizeJob,
@@ -65,6 +67,53 @@ assert.equal(sel2.counts.previouslySkipped, 1);
 assert.deepEqual(selectDoneToSync({ doneItems: [], videos }).toSync, []);
 assert.deepEqual(selectDoneToSync({ doneItems: null, videos: null }).toSync, []);
 
+// Auto-Done video whose YouTube bar reset: sticky library stays >= 95, but it
+// is still eligible to be marked watched again.
+const G = "ggggggggggg";
+const resetVideos = [
+  ...videos,
+  { id: G, title: "G", watchedPct: 96, needsYouTubeMarkWatched: true },
+];
+const resetSel = selectDoneToSync({
+  doneItems: [],
+  videos: resetVideos,
+  synced: { [G]: 1 },
+  regressedIds: [G],
+});
+assert.deepEqual(resetSel.toSync.map((v) => v.id), [G], "regressed auto-Done is re-synced even if previously synced");
+// After a successful mark, local regressedIds is cleared; alreadySynced holds
+// until the next scrape, even if the library flag is still set.
+const afterMark = selectDoneToSync({
+  doneItems: [],
+  videos: resetVideos,
+  synced: { [G]: 1 },
+  regressedIds: [],
+});
+assert.deepEqual(afterMark.toSync, []);
+assert.equal(afterMark.counts.alreadySynced, 1);
+
+// Manual Done that was synced, then YouTube reset below 95%.
+const manualReset = selectDoneToSync({
+  doneItems: [{ id: A }],
+  videos: [{ id: A, title: "A", watchedPct: 0 }],
+  synced: { [A]: 1 },
+  regressedIds: [A],
+});
+assert.deepEqual(manualReset.toSync.map((v) => v.id), [A]);
+
+assert.deepEqual(
+  regressedDoneIds(
+    [{ id: G, watchedPct: 96 }, { id: A, watchedPct: 10 }],
+    [{ id: G, watchedPct: 0 }, { id: A, watchedPct: 10 }],
+  ),
+  [G],
+);
+assert.deepEqual(
+  mergeRegressedIds([G, A], [G], [{ id: G, watchedPct: 100 }, { id: A, watchedPct: 0 }]),
+  [A],
+  "clears IDs whose scrape is once again Done",
+);
+
 // ---- seek target
 assert.equal(seekTarget(100), 96);
 assert.equal(seekTarget(3), 0);
@@ -94,10 +143,14 @@ assert.equal(reasonLabel("age_restricted"), "age-restricted");
 
 // ---- manifest + safety wiring
 const manifest = JSON.parse(ext("manifest.json"));
-assert.equal(manifest.version, "1.5.2");
+assert.equal(manifest.version, "1.5.3");
 assert.deepEqual(manifest.permissions, ["storage", "tabs", "scripting", "alarms"], "only alarms is new");
 assert.ok(manifest.host_permissions.includes("https://www.youtube.com/*"));
 const bg = ext("background.js");
+assert.match(bg, /unavailableCount/);
+assert.match(bg, /paginationExhausted/);
+assert.match(bg, /doneNeedsYouTubeMark/);
+assert.match(bg, /regressedIds/);
 assert.match(bg, /message\.confirmed !== true/, "start needs explicit confirmation");
 assert.match(bg, /isAutoDoneEnabled\(stored\[AUTO_DONE_KEY\]\)/, "unattended Done step only runs when the user opted in");
 assert.match(bg, /runDoneSync\(\{ maxVideos: AUTO_DONE_CAP \}\)/, "unattended Done step is capped");

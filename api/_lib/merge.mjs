@@ -9,6 +9,7 @@ import {
   resumeTimeFrom,
   statusFromWatchedPct,
 } from "./progress.mjs";
+import { isDonePct } from "./threshold.mjs";
 
 const PARTIAL_SYNC_MIN_PREVIOUS = 50;
 const PARTIAL_SYNC_RATIO = 0.8;
@@ -25,16 +26,24 @@ export function normalizeStatedCount(value) {
   return Number.isInteger(stated) && stated >= 0 ? stated : null;
 }
 
-export function isPartialWatchLaterScrape(existingVideos, scrapedCount, statedCount) {
+export function isPartialWatchLaterScrape(
+  existingVideos,
+  scrapedCount,
+  statedCount,
+  options = {},
+) {
   const previousOnList = existingVideos.filter(
     (video) => video?.id && video.droppedAt == null,
   ).length;
+  // Safety net: a scrape far smaller than the last library never counts as complete,
+  // even if YouTube's header or pagination flags look finished.
   const previousGuard =
     previousOnList >= PARTIAL_SYNC_MIN_PREVIOUS &&
     scrapedCount < PARTIAL_SYNC_RATIO * previousOnList;
+  if (previousGuard) return true;
 
   const stated = normalizeStatedCount(statedCount);
-  if (stated == null) return previousGuard;
+  if (stated == null) return false;
 
   // A stated count far below the previous on-list size is not YouTube's real
   // playlist total (a shelf label, a misparsed header). Such a count must never
@@ -42,13 +51,18 @@ export function isPartialWatchLaterScrape(existingVideos, scrapedCount, statedCo
   const statedUntrustworthy =
     previousOnList >= PARTIAL_SYNC_MIN_PREVIOUS &&
     stated < STATED_SANITY_RATIO * previousOnList;
+  if (statedUntrustworthy) return true;
 
-  // Both tests must pass for a scrape to count as complete.
-  return (
-    previousGuard ||
-    statedUntrustworthy ||
-    scrapedCount < STATED_COMPLETE_RATIO * stated
-  );
+  // Unavailable / private / deleted placeholder rows are in YouTube's header
+  // total but have no playable id, so they never appear in scrapedCount.
+  const unavailable = normalizeStatedCount(options.unavailableCount) ?? 0;
+  const comparableStated = Math.max(0, stated - unavailable);
+
+  // If Innertube followed every continuation token to the end, a header total
+  // a few percent above the playable row count is not a truncated scrape.
+  if (options.paginationExhausted === true) return false;
+
+  return scrapedCount < STATED_COMPLETE_RATIO * comparableStated;
 }
 
 export function clearDroppedStamps(videos) {
@@ -94,7 +108,14 @@ export function mergeWatchLaterLibrary(
 
     const prev = previous.get(scraped.id);
     const durationSec = scraped.durationSec || prev?.durationSec || 0;
-    const watchedPct = scraped.watchedPct;
+    // Once a video has reached the Done threshold, a later YouTube scrape
+    // (for example an accidental reopen that resets the bar to 0%) must not
+    // un-Done it in the library. Flag it so Sync Done to YouTube can push
+    // the mark back to YouTube.
+    const scrapedPct = scraped.watchedPct;
+    const stickyDone = isDonePct(prev?.watchedPct) && !isDonePct(scrapedPct);
+    const watchedPct = stickyDone ? Math.max(scrapedPct, prev.watchedPct) : scrapedPct;
+    const needsYouTubeMarkWatched = stickyDone;
     const title = scraped.title || prev?.title || scraped.id;
     const author = scraped.author || prev?.author || "";
     const duration =
@@ -106,7 +127,7 @@ export function mergeWatchLaterLibrary(
     const category = resolveCategory(prev, { title, author }, channelMaps);
     const techBusiness = category === "tech";
 
-    videos.push({
+    const row = {
       id: scraped.id,
       title,
       author,
@@ -123,11 +144,18 @@ export function mergeWatchLaterLibrary(
       savedRank,
       publishedAt,
       publishedLabel,
-    });
+    };
+    if (needsYouTubeMarkWatched) row.needsYouTubeMarkWatched = true;
+    videos.push(row);
   }
 
   const statedCount = normalizeStatedCount(options.statedCount);
-  const partial = isPartialWatchLaterScrape(prepared, seen.size, statedCount);
+  const unavailableCount = normalizeStatedCount(options.unavailableCount);
+  const paginationExhausted = options.paginationExhausted === true;
+  const partial = isPartialWatchLaterScrape(prepared, seen.size, statedCount, {
+    ...(unavailableCount != null ? { unavailableCount } : {}),
+    ...(paginationExhausted ? { paginationExhausted: true } : {}),
+  });
 
   let dropped = 0;
   const missing = [];
@@ -176,6 +204,8 @@ export function mergeWatchLaterLibrary(
       resetDropped,
       clearedDropped,
       statedCount,
+      unavailableCount,
+      paginationExhausted,
     },
   };
 }

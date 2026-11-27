@@ -2,13 +2,30 @@
   color-scheme: dark;
 }
 
-html,
-body {
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
   margin: 0;
-  width: 320px;
   background: #101014;
   color: #f2f2f5;
   font: 13px/1.45 "Segoe UI", system-ui, sans-serif;
+}
+
+/* Width lives on body only. A fixed width on both html and body, inside Arc's
+   native popup window, is what let a DPI/zoom mismatch clip the UI in half. */
+body {
+  margin: 0;
+  width: 320px;
+  max-width: 100%;
+  background: #101014;
+  color: #f2f2f5;
+  font: 13px/1.45 "Segoe UI", system-ui, sans-serif;
+  overflow-x: auto;
+  overflow-y: auto;
 }
 
 main {

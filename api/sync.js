@@ -36,7 +36,10 @@ export default async function handler(req, res) {
     const existing = await loadExistingLibrary(req);
     const syncedAt = new Date().toISOString();
     // Ignore a statedCount that is not a finite non-negative integer.
+    // unavailableCount and paginationExhausted are optional; older extensions
+    // omit them and the merge behaves exactly as before.
     const statedCount = normalizeStatedCount(body.statedCount);
+    const unavailableCount = normalizeStatedCount(body.unavailableCount);
     const { library, stats } = mergeWatchLaterLibrary(
       existing.videos ?? [],
       scraped,
@@ -44,6 +47,8 @@ export default async function handler(req, res) {
       {
         resetDropped,
         ...(statedCount != null ? { statedCount } : {}),
+        ...(unavailableCount != null ? { unavailableCount } : {}),
+        ...(body.paginationExhausted === true ? { paginationExhausted: true } : {}),
       },
     );
     await saveLiveLibrary(library);

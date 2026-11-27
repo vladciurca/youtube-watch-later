@@ -140,10 +140,13 @@ const byId = Object.fromEntries(library.videos.map((video) => [video.id, video])
 
 assert.equal(byId[returning.id].techBusiness, returning.techBusiness);
 assert.equal(byId[returning.id].category, returning.techBusiness ? "tech" : returning.category);
-assert.equal(byId[returning.id].status, "Partially watched");
+assert.equal(byId[returning.id].status, "Done", "a 100% video stays Done when YouTube later shows 55%");
+assert.equal(byId[returning.id].watchedPct, 100);
+assert.equal(byId[returning.id].needsYouTubeMarkWatched, true);
 assert.equal(byId[returning.id].droppedAt, null);
-assert.equal(byId[returning.id].remainingSec, remainingSecFrom(returning.durationSec, 55));
-assert.equal(byId[sample[1].id].status, "Barely started");
+assert.equal(byId[returning.id].remainingSec, remainingSecFrom(returning.durationSec, 100));
+assert.equal(byId[sample[1].id].status, "Done");
+assert.equal(byId[sample[1].id].needsYouTubeMarkWatched, true);
 assert.equal(byId[missing.id].droppedAt, syncedAt);
 assert.equal(byId[missing.id].title, missing.title);
 assert.equal(byId.AAAAAAAAAAA.techBusiness, false);
@@ -506,11 +509,13 @@ const popupJs = readFileSync(join(root, "../extension/popup.js"), "utf8");
 const backgroundJs = readFileSync(join(root, "../extension/background.js"), "utf8");
 const manifest = JSON.parse(readFileSync(join(root, "../extension/manifest.json"), "utf8"));
 const syncJs = readFileSync(join(root, "../api/sync.js"), "utf8");
-assert.equal(manifest.version, "1.5.2");
+assert.equal(manifest.version, "1.5.3");
 assert.match(backgroundJs, /previousOnListCount/);
 assert.match(backgroundJs, /statedCount/);
 assert.match(syncJs, /body\.statedCount/);
 assert.match(syncJs, /normalizeStatedCount\(body\.statedCount\)/);
+assert.match(syncJs, /body\.unavailableCount/);
+assert.match(syncJs, /body\.paginationExhausted === true/);
 assert.match(syncJs, /body\.resetDropped === true/);
 assert.match(popupJs, /Scraped \$\{scrapedCount\}/);
 assert.match(popupJs, /\(stated\)/);
@@ -518,6 +523,11 @@ assert.match(popupJs, /method \$\{result\.method\}/);
 assert.match(backgroundJs, /resetDroppedPending/);
 assert.match(backgroundJs, /resetDropped: true/);
 assert.match(popupJs, /Restoring Dropped from the incomplete first-page scrape/);
+assert.match(popupJs, /popupZoomForViewport/);
+assert.match(popupJs, /fitPopupToViewport/);
+const popupCss = readFileSync(join(root, "../extension/popup.css"), "utf8");
+assert.match(popupCss, /max-width:\s*100%/);
+assert.doesNotMatch(popupCss, /html,\s*body\s*\{[^}]*width:\s*320px/);
 
 // After the first-page massacre, previousOnList is ~100, so a later 100-video
 // scrape is NOT partial and keeps already-stamped droppedAt.
@@ -671,6 +681,24 @@ assert.equal(
   isPartialWatchLaterScrape(Array.from({ length: 100 }, (_, i) => previousLibraryVideo(i)), 97, 100),
   true,
 );
+
+// 709 playable of 724 stated: without hints this is just under 98%. Subtracting
+// 15 unavailable placeholders, or a naturally exhausted pagination, makes it complete.
+const previous722 = Array.from({ length: 722 }, (_, i) => previousLibraryVideo(i));
+assert.equal(isPartialWatchLaterScrape(previous722, 709, 724), true);
+assert.equal(
+  isPartialWatchLaterScrape(previous722, 709, 724, { unavailableCount: 15 }),
+  false,
+);
+assert.equal(
+  isPartialWatchLaterScrape(previous722, 709, 724, { paginationExhausted: true }),
+  false,
+);
+// The 80% previous-library guard still wins even when pagination claims to be done.
+assert.equal(
+  isPartialWatchLaterScrape(previous722, 100, 724, { paginationExhausted: true, unavailableCount: 15 }),
+  true,
+);
 assert.equal(
   isPartialWatchLaterScrape(Array.from({ length: 692 }, (_, i) => previousLibraryVideo(i)), 117, 692),
   true,
@@ -687,6 +715,26 @@ assert.equal(isPartialWatchLaterScrape(previous692, 400, 400), true);
 // almost the whole previous library.
 assert.equal(isPartialWatchLaterScrape(previous692, 680, 12), true);
 assert.equal(isPartialWatchLaterScrape(previous692, 680, 0), true);
+
+// A 709-of-724 exhausted scrape must not mass-drop the rest of the library,
+// and must count as complete so it can become the day's successful sync.
+{
+  const existing = Array.from({ length: 722 }, (_, i) => previousLibraryVideo(i));
+  const scrape709 = Array.from({ length: 709 }, (_, i) => scrapedLibraryVideo(i));
+  const exhausted = mergeWatchLaterLibrary(existing, scrape709, "2026-11-27T12:00:00.000Z", {
+    statedCount: 724,
+    paginationExhausted: true,
+    unavailableCount: 15,
+  });
+  assert.equal(exhausted.stats.partial, false);
+  assert.equal(exhausted.stats.dropped, 13);
+  assert.equal(exhausted.library.partial, false);
+  const stale = mergeWatchLaterLibrary(existing, scrape709, "2026-11-27T12:00:00.000Z", {
+    statedCount: 724,
+  });
+  assert.equal(stale.stats.partial, true, "older clients without the new flags stay conservative");
+  assert.equal(stale.stats.dropped, 0);
+}
 
 // A genuine removal of 60 videos is still a complete scrape.
 assert.equal(isPartialWatchLaterScrape(previous692, 632, 632), false);

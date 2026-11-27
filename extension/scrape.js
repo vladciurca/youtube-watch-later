@@ -325,6 +325,34 @@
     return video;
   }
 
+  const UNAVAILABLE_TITLE_RE =
+    /^\s*\[(private video|deleted video|unavailable video)\]\s*$/i;
+
+  function isUnavailableTitle(title) {
+    return UNAVAILABLE_TITLE_RE.test(String(title || ""));
+  }
+
+  // A playlist row that looks like a video but has no usable id (private /
+  // deleted / unplayable placeholders). Continuation chrome is not counted.
+  function isUnavailableRow(item) {
+    if (!item || typeof item !== "object") return false;
+    if (item.continuationItemRenderer || item.continuationItemViewModel) return false;
+    if (item.playlistVideoListRenderer) return false;
+    if (videoFromItem(item)?.id) return false;
+    const renderer = itemVideoRenderer(item);
+    const lockup = itemLockup(item);
+    if (renderer || lockup) return true;
+    const title =
+      textOf(renderer?.title) ||
+      textOf(lockup?.metadata?.lockupMetadataViewModel?.title) ||
+      "";
+    return isUnavailableTitle(title);
+  }
+
+  function noteUnavailable(item, stats) {
+    if (stats && isUnavailableRow(item)) stats.unavailableCount += 1;
+  }
+
   function isWatchLaterPlaylist(renderer) {
     if (!renderer || !Array.isArray(renderer.contents)) return false;
     if (renderer.playlistId === "WL") return true;
@@ -417,21 +445,22 @@
     return next;
   }
 
-  function collectFromItems(items, videos) {
+  function collectFromItems(items, videos, stats) {
     let next = null;
     if (!Array.isArray(items)) return next;
     for (const item of items) {
       const video = videoFromItem(item);
       if (video) videos.push(video);
+      else noteUnavailable(item, stats);
       const info = continuationInfo(item);
       if (info) next = info;
     }
     return next;
   }
 
-  function collectFromPlaylistRenderer(renderer, videos) {
+  function collectFromPlaylistRenderer(renderer, videos, stats) {
     if (!renderer) return null;
-    const fromItems = collectFromItems(renderer.contents, videos);
+    const fromItems = collectFromItems(renderer.contents, videos, stats);
     const legacy = tokenFromContinuations(renderer.continuations);
     return fromItems || legacy;
   }
@@ -448,7 +477,7 @@
     }
   }
 
-  function parseInitialBrowse(payload) {
+  function parseInitialBrowse(payload, stats) {
     const tabs = payload?.contents?.twoColumnBrowseResultsRenderer?.tabs;
     const videos = [];
     let inList = null;
@@ -484,7 +513,7 @@
             const renderer = item?.playlistVideoListRenderer;
             if (renderer) {
               const batch = [];
-              const info = collectFromPlaylistRenderer(renderer, batch);
+              const info = collectFromPlaylistRenderer(renderer, batch, stats);
               const wl =
                 isWatchLaterPlaylist(renderer) || batch.some((video) => video._playlistId === "WL");
               if (wl && !sawWatchLater) {
@@ -501,6 +530,7 @@
 
             const video = videoFromItem(item);
             const info = continuationInfo(item);
+            if (!video) noteUnavailable(item, stats);
             if (video) {
               const wl = video._playlistId === "WL";
               if (wl && !sawWatchLater) {
@@ -547,17 +577,17 @@
     }
   }
 
-  function consumeLists(lists) {
+  function consumeLists(lists, stats) {
     const videos = [];
     let continuation = null;
     for (const items of lists) {
-      const info = collectFromItems(items, videos);
+      const info = collectFromItems(items, videos, stats);
       if (info) continuation = info;
     }
     return { videos, continuation };
   }
 
-  function parseActionLists(payload) {
+  function parseActionLists(payload, stats) {
     const lists = [];
     const received = [
       ...(Array.isArray(payload?.onResponseReceivedActions) ? payload.onResponseReceivedActions : []),
@@ -570,10 +600,10 @@
     ];
     for (const action of received) pushContinuationItemLists(action, lists);
     if (!lists.length) return { videos: [], continuation: null };
-    return consumeLists(lists);
+    return consumeLists(lists, stats);
   }
 
-  function parseContinuationContents(payload) {
+  function parseContinuationContents(payload, stats) {
     const continuationContents = payload?.continuationContents;
     if (!continuationContents || typeof continuationContents !== "object") {
       return { videos: [], continuation: null };
@@ -583,43 +613,44 @@
     for (const value of Object.values(continuationContents)) {
       if (!value || typeof value !== "object") continue;
       if (Array.isArray(value.contents)) {
-        const info = collectFromItems(value.contents, videos);
+        const info = collectFromItems(value.contents, videos, stats);
         if (info) continuation = info;
       }
       const legacy = tokenFromContinuations(value.continuations);
       if (legacy) continuation = legacy;
       if (value.playlistVideoListRenderer) {
-        const info = collectFromPlaylistRenderer(value.playlistVideoListRenderer, videos);
+        const info = collectFromPlaylistRenderer(value.playlistVideoListRenderer, videos, stats);
         if (info) continuation = info;
       }
     }
     return { videos, continuation };
   }
 
-  function parseLoosePlaylist(payload) {
+  function parseLoosePlaylist(payload, stats) {
     const videos = [];
     const direct =
       payload?.contents?.playlistVideoListRenderer || payload?.playlistVideoListRenderer;
-    const continuation = direct ? collectFromPlaylistRenderer(direct, videos) : null;
+    const continuation = direct ? collectFromPlaylistRenderer(direct, videos, stats) : null;
     return { videos, continuation };
   }
 
   function parseInnertubePlaylistPage(payload) {
     const statedCount = playlistCountHint(payload);
-    const fromActions = parseActionLists(payload);
+    const stats = { unavailableCount: 0 };
+    const fromActions = parseActionLists(payload, stats);
     if (fromActions.videos.length || fromActions.continuation) {
-      return { ...fromActions, statedCount };
+      return { ...fromActions, statedCount, unavailableCount: stats.unavailableCount };
     }
-    const fromContents = parseContinuationContents(payload);
+    const fromContents = parseContinuationContents(payload, stats);
     if (fromContents.videos.length || fromContents.continuation) {
-      return { ...fromContents, statedCount };
+      return { ...fromContents, statedCount, unavailableCount: stats.unavailableCount };
     }
-    const initial = parseInitialBrowse(payload);
+    const initial = parseInitialBrowse(payload, stats);
     if (initial.videos.length || initial.continuation) {
-      return { ...initial, statedCount };
+      return { ...initial, statedCount, unavailableCount: stats.unavailableCount };
     }
-    const loose = parseLoosePlaylist(payload);
-    return { ...loose, statedCount };
+    const loose = parseLoosePlaylist(payload, stats);
+    return { ...loose, statedCount, unavailableCount: stats.unavailableCount };
   }
 
   function countFromVideoLabel(text) {
@@ -658,12 +689,19 @@
   function looksTruncated(videoCount, options = {}) {
     const n = Number(videoCount) || 0;
     if (n <= 0) return true;
+    const pagesFetched = Number(options.pagesFetched) || 0;
+    const firstPageOnly =
+      options.method === "innertube" && n <= FIRST_PAGE_MAX && pagesFetched <= 1;
+    // A first-page-only result is still suspect even if the token ran out.
+    if (firstPageOnly) return true;
+    if (options.paginationExhausted === true) return false;
     const expected = Number(options.expectedCount);
     if (Number.isFinite(expected) && expected > 0) {
-      return n < COMPLETE_RATIO * expected;
+      const unavailable = Number(options.unavailableCount);
+      const missing = Number.isFinite(unavailable) && unavailable > 0 ? unavailable : 0;
+      return n < COMPLETE_RATIO * Math.max(0, expected - missing);
     }
-    const pagesFetched = Number(options.pagesFetched) || 0;
-    return options.method === "innertube" && n <= FIRST_PAGE_MAX && pagesFetched <= 1;
+    return false;
   }
 
   function uniqueVideoCount(videos) {
@@ -801,10 +839,13 @@
     }
     let continuation = first.continuation;
     let statedCount = first.statedCount;
+    let unavailableCount = Number(first.unavailableCount) || 0;
 
     let guard = 0;
     let emptyStreak = 0;
     let previousToken = null;
+    let requestError = false;
+    let emptyAbort = false;
     const headers = await innertubeHeaders(ytcfg, context);
     while (continuation?.token && videos.length < MAX_VIDEOS && guard < MAX_PAGES) {
       if (continuation.token === previousToken) break;
@@ -816,11 +857,18 @@
         credentials: "same-origin",
         body: JSON.stringify({ context, continuation: continuation.token }),
       });
-      if (!response.ok) break;
+      if (!response.ok) {
+        requestError = true;
+        break;
+      }
       const payload = await response.json();
-      if (payload?.error) break;
+      if (payload?.error) {
+        requestError = true;
+        break;
+      }
       const page = parseInnertubePlaylistPage(payload);
       if (!statedCount && page.statedCount) statedCount = page.statedCount;
+      unavailableCount += Number(page.unavailableCount) || 0;
       continuation = page.continuation;
       let added = 0;
       for (const video of page.videos) {
@@ -832,19 +880,33 @@
       }
       if (added === 0) {
         emptyStreak += 1;
-        if (emptyStreak >= MAX_EMPTY_PAGES) break;
+        if (emptyStreak >= MAX_EMPTY_PAGES) {
+          emptyAbort = true;
+          break;
+        }
       } else {
         emptyStreak = 0;
       }
     }
 
     if (videos.length === 0) return null;
+    const hitPageCap = guard >= MAX_PAGES && !!continuation?.token;
+    const hitVideoCap = videos.length >= MAX_VIDEOS && !!continuation?.token;
+    const paginationExhausted =
+      !requestError &&
+      !emptyAbort &&
+      !hitPageCap &&
+      !hitVideoCap &&
+      !continuation?.token &&
+      guard > 1;
     return {
       videos: finalizeRanks(videos),
       method: "innertube",
       pagesFetched: guard,
       playlistCount: statedCount,
       statedCount,
+      unavailableCount,
+      paginationExhausted,
     };
   }
 
@@ -987,13 +1049,18 @@
   async function scrapeDom(statedHint) {
     const seen = new Map();
     let stagnant = 0;
+    let unavailableCount = 0;
     const stated = statedCountFromDom() || (Number(statedHint) > 0 ? Number(statedHint) : null);
     for (let i = 0; i < 200 && stagnant < 8 && seen.size < MAX_VIDEOS; i += 1) {
       const rows = playlistRows();
       const before = seen.size;
       for (const row of rows) {
         const id = idFromRow(row);
-        if (!id || seen.has(id)) continue;
+        if (!id) {
+          if (isUnavailableTitle(titleFromRow(row))) unavailableCount += 1;
+          continue;
+        }
+        if (seen.has(id)) continue;
         const duration = durationFromRow(row);
         const publishedLabel = publishedFromRow(row);
         const savedRank = seen.size;
@@ -1025,6 +1092,8 @@
       method: "dom",
       playlistCount: stated,
       statedCount: stated,
+      unavailableCount,
+      paginationExhausted: false,
     };
   }
 
@@ -1050,6 +1119,8 @@
     playlistCountHint,
     countFromVideoLabel,
     parsePublishedRelative,
+    isUnavailableRow,
+    isUnavailableTitle,
     COMPLETE_RATIO,
     MAX_VIDEOS,
   };
@@ -1069,6 +1140,8 @@
         expectedCount,
         method: innertube.method,
         pagesFetched: innertube.pagesFetched,
+        unavailableCount: innertube.unavailableCount,
+        paginationExhausted: innertube.paginationExhausted,
       });
     if (innertube && !innertubeTruncated) {
       return { ...innertube, statedCount: expectedCount ?? innertube.statedCount ?? null };

@@ -491,6 +491,54 @@ const PAGE = 100;
   assert.equal(helpers.looksTruncated(663, { expectedCount: 676 }), false);
   assert.equal(helpers.looksTruncated(97, { expectedCount: 100 }), true);
   assert.equal(helpers.looksTruncated(98, { expectedCount: 100 }), false);
+  assert.equal(helpers.looksTruncated(709, { expectedCount: 724 }), true);
+  assert.equal(
+    helpers.looksTruncated(709, { expectedCount: 724, unavailableCount: 15 }),
+    false,
+  );
+  assert.equal(
+    helpers.looksTruncated(709, {
+      expectedCount: 724,
+      method: "innertube",
+      pagesFetched: 8,
+      paginationExhausted: true,
+    }),
+    false,
+  );
+  assert.equal(
+    helpers.looksTruncated(100, {
+      expectedCount: 724,
+      method: "innertube",
+      pagesFetched: 1,
+      paginationExhausted: true,
+    }),
+    true,
+    "first-page-only exhaustion is still truncated",
+  );
+  assert.equal(helpers.isUnavailableTitle("[Private video]"), true);
+  assert.equal(helpers.isUnavailableTitle("[Deleted video]"), true);
+  assert.equal(helpers.isUnavailableRow({ playlistVideoRenderer: { title: { simpleText: "[Deleted video]" } } }), true);
+  assert.equal(helpers.isUnavailableRow({ playlistVideoRenderer: { videoId: videoId(1), title: { simpleText: "Ok" } } }), false);
+  assert.equal(helpers.isUnavailableRow({ continuationItemRenderer: {} }), false);
+
+  const mixed = {
+    header: { title: { simpleText: "724 videos" } },
+    contents: {
+      playlistVideoListRenderer: {
+        contents: [
+          playlistVideoItem(0),
+          { playlistVideoRenderer: { title: { simpleText: "[Private video]" } } },
+          { playlistVideoRenderer: { title: { simpleText: "[Deleted video]" } } },
+          playlistVideoItem(1),
+          { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: "next" } } } },
+        ],
+      },
+    },
+  };
+  const parsedMixed = helpers.parseInnertubePlaylistPage(mixed);
+  assert.equal(parsedMixed.videos.length, 2);
+  assert.equal(parsedMixed.unavailableCount, 2);
+  assert.equal(parsedMixed.statedCount, 724);
   assert.equal(
     helpers.pickRicherScrape({ videos: [{ id: "a" }] }, { videos: [{ id: "a" }, { id: "b" }] })
       .videos.length,
@@ -508,10 +556,12 @@ const PAGE = 100;
   assert.equal(helpers.playlistCountHint(initialPage(1, null, { headerCount: 676 })), 676);
 }
 
-assert.equal(manifest.version, "1.5.2");
+assert.equal(manifest.version, "1.5.3");
 assert.match(backgroundSource, /previousOnListCount/);
 assert.match(backgroundSource, /expectedCount/);
 assert.match(backgroundSource, /statedCount/);
+assert.match(backgroundSource, /unavailableCount/);
+assert.match(backgroundSource, /paginationExhausted/);
 assert.equal(scrapeSource.includes("console."), false);
 assert.match(scrapeSource, /MAX_VIDEOS = 5000/);
 assert.match(scrapeSource, /MAX_PAGES = 80/);
