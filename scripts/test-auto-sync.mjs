@@ -198,6 +198,10 @@ assert.match(describeLastRun(failAfterOk, NOW + 30 * H), /\(failed\)/);
 assert.equal(describeSyncResult({ scraped: 700, dropped: 3 }), "scraped 700, 3 marked Dropped");
 assert.match(describeSyncResult({ scraped: 40, partial: true }), /incomplete scrape \(40 videos\)/);
 assert.match(describeSyncResult({ scraped: 40, partial: true }), /does not count as a full sync/);
+assert.match(
+  describeSyncResult({ scraped: 709, statedCount: 724, partial: true }),
+  /incomplete scrape \(709 of 724 stated\)/,
+);
 
 // Every way a run can miss an accepted POST has its own sentence.
 assert.equal(hasSyncSecret(undefined), false);

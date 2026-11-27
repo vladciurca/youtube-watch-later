@@ -51,7 +51,7 @@ Those skipped checks are kept in `chrome.storage.local` under `autoSync` as `las
 
 1. Unzip `extension/watch-later-sync.zip` over the folder the extension is loaded from (typically `~/Extensions/watch-later-sync`). Prefer the same folder so the Library URL and sync secret stay saved.
 2. Open `arc://extensions` (or `chrome://extensions`). Same folder: click reload on **Watch Later Sync**. New folder: remove the old one, **Load unpacked** the new folder, then re-enter the Library URL and the sync secret.
-3. Confirm the extensions page shows version **1.5.3**. Open the popup: the full width of the title, fields, and **Sync Watch Later** button should be visible, and the **Automatic sync** block should appear below the button without clipping.
+3. Confirm the extensions page shows version **1.5.3**. Open the popup: the full width of the title, fields, and **Sync Watch Later** button should be visible, and the **Automatic sync** block should appear below the button without clipping. The popup and scrape/Done-step changes work with the current production library; sticky Done and treating a 709-of-724 exhausted scrape as complete need the matching site deploy (this PR) to be merged.
 
 ### Update to 1.5.2 (Arc/Chrome on Mac)
 

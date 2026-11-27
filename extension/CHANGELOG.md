@@ -3,6 +3,8 @@
 ## 1.5.3
 
 - Fix the popup clipping down the middle in Arc on macOS. Arc opens the popup as a native window, and a Retina / custom-scaling / browser-zoom mismatch was painting the 320px layout at 2x inside a 1x-sized window, so labels, fields, and the Sync button were cut in half and the Automatic sync block sat in the empty lower half. The popup now sizes to the real viewport (and can scroll if it is still short).
+- Sticky Done: once a video reaches 95% watched, a later scrape that shows a lower bar (for example an accidental reopen on the web that resets it to 0%) no longer un-Dones it in the library. Those reset videos, and manual Done marks whose YouTube bar also dropped, can be re-pushed by **Sync Done to YouTube** even if this browser had already synced them once.
+- An Innertube scrape that ran to the end of the continuation token, or that is short of YouTube's header total only by private/deleted placeholder rows, is treated as complete. The 80% previous-library guard is unchanged, so a genuinely short scrape still cannot mass-drop the list. Incomplete-sync messages now say `709 of 724 stated` when the header count is known.
 
 ## 1.5.2
 

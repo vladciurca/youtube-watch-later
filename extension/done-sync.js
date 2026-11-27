@@ -21,22 +21,78 @@ function isDonePct(pct) {
 }
 
 /**
+ * IDs whose last known library progress was Done (>= 95%) but a later YouTube
+ * scrape came back below the threshold (for example an accidental reopen).
+ */
+export function regressedDoneIds(previousVideos, scrapedVideos) {
+  const scrapedById = new Map();
+  for (const video of Array.isArray(scrapedVideos) ? scrapedVideos : []) {
+    if (video?.id) scrapedById.set(video.id, video);
+  }
+  const ids = [];
+  const seen = new Set();
+  for (const prev of Array.isArray(previousVideos) ? previousVideos : []) {
+    if (!isVideoId(prev?.id) || seen.has(prev.id) || !isDonePct(prev.watchedPct)) continue;
+    const scraped = scrapedById.get(prev.id);
+    if (!scraped || isDonePct(scraped.watchedPct)) continue;
+    seen.add(prev.id);
+    ids.push(prev.id);
+  }
+  return ids;
+}
+
+/**
+ * Merge a new regression list with the one stored in this browser: add new
+ * regressions, and drop IDs whose latest scrape is once again >= 95%.
+ */
+export function mergeRegressedIds(previous, next, scrapedVideos) {
+  const scrapedById = new Map();
+  for (const video of Array.isArray(scrapedVideos) ? scrapedVideos : []) {
+    if (video?.id) scrapedById.set(video.id, video);
+  }
+  const out = [];
+  const seen = new Set();
+  for (const id of [...(Array.isArray(previous) ? previous : []), ...(Array.isArray(next) ? next : [])]) {
+    if (!isVideoId(id) || seen.has(id)) continue;
+    const scraped = scrapedById.get(id);
+    if (scraped && isDonePct(scraped.watchedPct)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+/**
  * Which of the app's Done videos should be pushed to YouTube.
  *
- * doneItems  : /api/done items [{ id, doneAt }]
- * videos     : /api/library videos
- * synced     : { [id]: timestamp } already pushed from this browser
- * skipped    : { [id]: reason } previously found unsyncable (live, private, ...)
+ * doneItems    : /api/done items [{ id, doneAt }]
+ * videos       : /api/library videos
+ * synced       : { [id]: timestamp } already pushed from this browser
+ * skipped      : { [id]: reason } previously found unsyncable (live, private, ...)
+ * regressedIds : auto-Done (or previously synced) IDs whose YouTube bar reset
  *
- * Order follows the Done list (oldest mark first). Videos YouTube already shows
- * as watched (>= 95% in the last library sync) are skipped, as are ones already
- * synced, previously skipped, or no longer in the library.
+ * Order follows the Done list (oldest mark first), then flagged regressions
+ * that are not already in that list. Videos YouTube already shows as watched
+ * (>= 95% in the last library sync, and not flagged as reset) are skipped, as
+ * are ones already synced (unless they have since reset), previously skipped,
+ * or no longer in the library.
  */
-export function selectDoneToSync({ doneItems, videos, synced = {}, skipped = {} }) {
+export function selectDoneToSync({
+  doneItems,
+  videos,
+  synced = {},
+  skipped = {},
+  regressedIds = [],
+} = {}) {
   const byId = new Map();
   for (const video of Array.isArray(videos) ? videos : []) {
     if (video?.id) byId.set(video.id, video);
   }
+  const regressed = new Set(
+    (Array.isArray(regressedIds) ? regressedIds : []).filter((id) => isVideoId(id)),
+  );
+  const needsMark = (video) =>
+    !!video && (video.needsYouTubeMarkWatched === true || regressed.has(video.id));
   const toSync = [];
   const counts = {
     alreadyWatched: 0,
@@ -46,32 +102,46 @@ export function selectDoneToSync({ doneItems, videos, synced = {}, skipped = {} 
     invalid: 0,
   };
   const seen = new Set();
-  for (const item of Array.isArray(doneItems) ? doneItems : []) {
-    const id = typeof item === "string" ? item : item?.id;
+
+  const consider = (id) => {
     if (!isVideoId(id)) {
       counts.invalid += 1;
-      continue;
+      return;
     }
-    if (seen.has(id)) continue;
+    if (seen.has(id)) return;
     seen.add(id);
     const video = byId.get(id);
     if (!video) {
       counts.notInLibrary += 1;
-      continue;
+      return;
     }
-    if (isDonePct(video.watchedPct)) {
+    const flagged = needsMark(video);
+    // alreadySynced stays in force after a successful mark, even if the
+    // library still has needsYouTubeMarkWatched from the last sync. Only a
+    // later scrape (regressedIds) re-opens the video.
+    if (isDonePct(video.watchedPct) && !flagged) {
       counts.alreadyWatched += 1;
-      continue;
+      return;
     }
-    if (synced[id]) {
+    if (synced[id] && !regressed.has(id)) {
       counts.alreadySynced += 1;
-      continue;
+      return;
     }
     if (skipped[id]) {
       counts.previouslySkipped += 1;
-      continue;
+      return;
     }
     toSync.push({ id, title: video.title || id });
+  };
+
+  for (const item of Array.isArray(doneItems) ? doneItems : []) {
+    consider(typeof item === "string" ? item : item?.id);
+  }
+  for (const video of Array.isArray(videos) ? videos : []) {
+    if (needsMark(video) && !seen.has(video.id)) consider(video.id);
+  }
+  for (const id of regressed) {
+    if (!seen.has(id)) consider(id);
   }
   return { toSync, counts };
 }

@@ -16,7 +16,9 @@ import {
 import {
   finishJob,
   initialJob,
+  mergeRegressedIds,
   recordResult,
+  regressedDoneIds,
   selectDoneToSync,
 } from "./done-sync.js";
 
@@ -106,17 +108,21 @@ async function findOrOpenWatchLater({ background = false } = {}) {
   return { tabId: created.id, created: true };
 }
 
-async function previousOnListCount(apiUrl) {
+async function loadPreviousLibrary(apiUrl) {
   try {
     const response = await fetch(`${apiUrl}/api/library`, { cache: "no-store" });
-    if (!response.ok) return null;
+    if (!response.ok) return [];
     const payload = await response.json();
-    const videos = Array.isArray(payload?.videos) ? payload.videos : [];
-    const onList = videos.filter((video) => video?.id && video.droppedAt == null).length;
-    return onList > 0 ? onList : null;
+    return Array.isArray(payload?.videos) ? payload.videos : [];
   } catch {
-    return null;
+    return [];
   }
+}
+
+async function previousOnListCount(apiUrl) {
+  const videos = await loadPreviousLibrary(apiUrl);
+  const onList = videos.filter((video) => video?.id && video.droppedAt == null).length;
+  return onList > 0 ? onList : null;
 }
 
 async function scrapeTab(tabId, expectedCount) {
@@ -151,8 +157,9 @@ async function markResetDroppedDone() {
   await chrome.storage.local.set({ [RESET_DROPPED_PENDING_KEY]: false });
 }
 
-async function postSync(apiUrl, syncSecret, videos, resetDropped, statedCountValue) {
-  const statedCount = Number(statedCountValue);
+async function postSync(apiUrl, syncSecret, videos, resetDropped, syncMeta = {}) {
+  const statedCount = Number(syncMeta.statedCount);
+  const unavailableCount = Number(syncMeta.unavailableCount);
   const response = await fetch(`${apiUrl}/api/sync`, {
     method: "POST",
     headers: {
@@ -162,6 +169,12 @@ async function postSync(apiUrl, syncSecret, videos, resetDropped, statedCountVal
     body: JSON.stringify({
       videos,
       ...(Number.isFinite(statedCount) && statedCount > 0 ? { statedCount } : {}),
+      // Older library servers ignore these two keys; they are safe to send
+      // to production before the matching API is merged.
+      ...(Number.isInteger(unavailableCount) && unavailableCount >= 0
+        ? { unavailableCount }
+        : {}),
+      ...(syncMeta.paginationExhausted === true ? { paginationExhausted: true } : {}),
       ...(resetDropped ? { resetDropped: true } : {}),
     }),
   });
@@ -183,10 +196,14 @@ async function performWatchLaterSync({ background = false } = {}) {
     if (!syncSecret) {
       throw new Error("Set the sync secret in this popup (same value as Vercel SYNC_SECRET).");
     }
-    const [opened, expectedCount] = await Promise.all([
+    const [opened, previousVideos] = await Promise.all([
       findOrOpenWatchLater({ background }),
-      previousOnListCount(apiUrl),
+      loadPreviousLibrary(apiUrl),
     ]);
+    const expectedCount = (() => {
+      const onList = previousVideos.filter((video) => video?.id && video.droppedAt == null).length;
+      return onList > 0 ? onList : null;
+    })();
     tabId = opened.tabId;
     created = opened.created;
     const scraped = await scrapeTab(tabId, expectedCount);
@@ -194,22 +211,23 @@ async function performWatchLaterSync({ background = false } = {}) {
       throw new Error("No Watch Later videos were scraped.");
     }
     const resetDropped = await shouldResetDropped();
-    const result = await postSync(
-      apiUrl,
-      syncSecret,
-      scraped.videos,
-      resetDropped,
-      scraped.statedCount,
-    );
+    const result = await postSync(apiUrl, syncSecret, scraped.videos, resetDropped, {
+      statedCount: scraped.statedCount,
+      unavailableCount: scraped.unavailableCount,
+      paginationExhausted: scraped.paginationExhausted,
+    });
     if (resetDropped && result.resetDropped === true) {
       await markResetDroppedDone();
     }
+    await rememberRegressedDone(previousVideos, scraped.videos);
     return {
       ok: true,
       ...result,
       method: scraped.method,
       scraped: scraped.videos.length,
       statedCount: scraped.statedCount ?? result.statedCount ?? null,
+      unavailableCount: scraped.unavailableCount ?? result.unavailableCount ?? null,
+      paginationExhausted: scraped.paginationExhausted === true,
       resetDropped: result.resetDropped === true,
       clearedDropped: result.clearedDropped ?? 0,
     };
@@ -252,6 +270,23 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 const JOB_KEY = "doneSyncJob";
 const SYNCED_KEY = "doneSynced";
 const SKIPPED_KEY = "doneSyncSkipped";
+const REGRESSED_KEY = "doneNeedsYouTubeMark";
+
+async function rememberRegressedDone(previousVideos, scrapedVideos) {
+  const stored = await chrome.storage.local.get([REGRESSED_KEY]);
+  const next = mergeRegressedIds(
+    stored[REGRESSED_KEY],
+    regressedDoneIds(previousVideos, scrapedVideos),
+    scrapedVideos,
+  );
+  await chrome.storage.local.set({ [REGRESSED_KEY]: next });
+  return next;
+}
+
+async function loadRegressedIds() {
+  const stored = await chrome.storage.local.get([REGRESSED_KEY]);
+  return Array.isArray(stored[REGRESSED_KEY]) ? stored[REGRESSED_KEY] : [];
+}
 const PER_VIDEO_TIMEOUT_MS = 100000;
 const DEFAULT_WATCH_BASE = "https://www.youtube.com/watch";
 
@@ -270,13 +305,14 @@ async function previewDoneSync() {
   const [done, library, stored] = await Promise.all([
     fetchJson(`${apiUrl}/api/done`),
     fetchJson(`${apiUrl}/api/library`),
-    chrome.storage.local.get([SYNCED_KEY, SKIPPED_KEY]),
+    chrome.storage.local.get([SYNCED_KEY, SKIPPED_KEY, REGRESSED_KEY]),
   ]);
   const selection = selectDoneToSync({
     doneItems: done.items ?? [],
     videos: library.videos ?? [],
     synced: stored[SYNCED_KEY] ?? {},
     skipped: stored[SKIPPED_KEY] ?? {},
+    regressedIds: stored[REGRESSED_KEY] ?? [],
   });
   return {
     ok: true,
@@ -371,13 +407,14 @@ async function runDoneSync({ maxVideos = Infinity } = {}) {
   const [done, library, state] = await Promise.all([
     fetchJson(`${apiUrl}/api/done`),
     fetchJson(`${apiUrl}/api/library`),
-    chrome.storage.local.get([SYNCED_KEY, SKIPPED_KEY]),
+    chrome.storage.local.get([SYNCED_KEY, SKIPPED_KEY, REGRESSED_KEY]),
   ]);
   const { toSync: allToSync } = selectDoneToSync({
     doneItems: done.items ?? [],
     videos: library.videos ?? [],
     synced: state[SYNCED_KEY] ?? {},
     skipped: state[SKIPPED_KEY] ?? {},
+    regressedIds: state[REGRESSED_KEY] ?? [],
   });
   // Unattended runs cap how many videos they touch; the rest wait for the next run.
   const toSync = allToSync.slice(0, maxVideos);
@@ -398,9 +435,11 @@ async function runDoneSync({ maxVideos = Infinity } = {}) {
       }
       job = recordResult(job, video, result);
       if (result.status === "ok") {
-        const current = await chrome.storage.local.get([SYNCED_KEY]);
+        const current = await chrome.storage.local.get([SYNCED_KEY, REGRESSED_KEY]);
+        const remaining = (current[REGRESSED_KEY] ?? []).filter((id) => id !== video.id);
         await chrome.storage.local.set({
           [SYNCED_KEY]: { ...(current[SYNCED_KEY] ?? {}), [video.id]: Date.now() },
+          [REGRESSED_KEY]: remaining,
         });
       } else if (["live", "unavailable", "private", "age_restricted"].includes(result.status)) {
         const current = await chrome.storage.local.get([SKIPPED_KEY]);

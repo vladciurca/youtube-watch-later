@@ -205,8 +205,11 @@ export function describeAutoStatus({
 export function describeSyncResult(result) {
   const scraped = result?.scraped ?? result?.upserted ?? 0;
   const dropped = result?.dropped ?? 0;
+  const stated = Number(result?.statedCount);
+  const ofStated =
+    Number.isFinite(stated) && stated > 0 ? ` of ${stated} stated` : " videos";
   return result?.partial
-    ? `incomplete scrape (${scraped} videos) — the library kept previous entries and this does not count as a full sync`
+    ? `incomplete scrape (${scraped}${ofStated}) — the library kept previous entries and this does not count as a full sync`
     : `scraped ${scraped}, ${dropped} marked Dropped`;
 }
 
