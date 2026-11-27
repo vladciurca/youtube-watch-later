@@ -8,6 +8,22 @@ import {
   recordAttempt,
 } from "./auto-sync.js";
 import { reasonLabel, summarizeJob } from "./done-sync.js";
+import { POPUP_WIDTH, popupZoomForViewport } from "./popup-fit.js";
+
+function fitPopupToViewport() {
+  const root = document.documentElement;
+  root.style.zoom = "";
+  const zoom = popupZoomForViewport({
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+    layoutWidth: Math.max(root.scrollWidth, POPUP_WIDTH),
+    layoutHeight: root.scrollHeight,
+  });
+  root.style.zoom = zoom;
+}
+
+fitPopupToViewport();
+window.addEventListener("resize", fitPopupToViewport);
 
 const DEFAULT_API = "https://youtube-watch-later.vercel.app";
 

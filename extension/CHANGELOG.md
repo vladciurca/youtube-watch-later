@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.3
+
+- Fix the popup clipping down the middle in Arc on macOS. Arc opens the popup as a native window, and a Retina / custom-scaling / browser-zoom mismatch was painting the 320px layout at 2x inside a 1x-sized window, so labels, fields, and the Sync button were cut in half and the Automatic sync block sat in the empty lower half. The popup now sizes to the real viewport (and can scroll if it is still short).
+
 ## 1.5.2
 
 - Run now records a specific result for every way it can finish without the library accepting the upload, and the popup shows that sentence (including in the status line under the buttons). Covered: no sync secret, a 401 or 403 from the server, a network error, a scrape that returned zero videos, an incomplete scrape, the Watch Later tab timing out, the background not answering ("Run never started"), and a run the browser killed before it finished ("Run never finished"). A whitespace-only secret is treated as missing. The background stays awake until that result is written, so closing the popup no longer drops the run on the floor and leaves yesterday's line in place.

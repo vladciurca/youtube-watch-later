@@ -263,7 +263,7 @@ assert.equal(describeDoneStep(null), "Done step did not run");
 
 // wiring in the extension
 const manifest = JSON.parse(ext("manifest.json"));
-assert.equal(manifest.version, "1.5.2");
+assert.equal(manifest.version, "1.5.3");
 assert.deepEqual(manifest.permissions, ["storage", "tabs", "scripting", "alarms"]);
 const bg = ext("background.js");
 assert.match(bg, /chrome\.alarms\.create\(AUTO_ALARM, \{ delayInMinutes: 5, periodInMinutes: 60 \}\)/);

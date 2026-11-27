@@ -506,7 +506,7 @@ const popupJs = readFileSync(join(root, "../extension/popup.js"), "utf8");
 const backgroundJs = readFileSync(join(root, "../extension/background.js"), "utf8");
 const manifest = JSON.parse(readFileSync(join(root, "../extension/manifest.json"), "utf8"));
 const syncJs = readFileSync(join(root, "../api/sync.js"), "utf8");
-assert.equal(manifest.version, "1.5.2");
+assert.equal(manifest.version, "1.5.3");
 assert.match(backgroundJs, /previousOnListCount/);
 assert.match(backgroundJs, /statedCount/);
 assert.match(syncJs, /body\.statedCount/);
@@ -518,6 +518,11 @@ assert.match(popupJs, /method \$\{result\.method\}/);
 assert.match(backgroundJs, /resetDroppedPending/);
 assert.match(backgroundJs, /resetDropped: true/);
 assert.match(popupJs, /Restoring Dropped from the incomplete first-page scrape/);
+assert.match(popupJs, /popupZoomForViewport/);
+assert.match(popupJs, /fitPopupToViewport/);
+const popupCss = readFileSync(join(root, "../extension/popup.css"), "utf8");
+assert.match(popupCss, /max-width:\s*100%/);
+assert.doesNotMatch(popupCss, /html,\s*body\s*\{[^}]*width:\s*320px/);
 
 // After the first-page massacre, previousOnList is ~100, so a later 100-video
 // scrape is NOT partial and keeps already-stamped droppedAt.
