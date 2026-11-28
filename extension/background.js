@@ -1,16 +1,19 @@
 import {
   AUTO_DONE_CAP,
+  LEGACY_AUTO_DONE_KEY,
+  MARK_DONE_KEY,
+  appendDoneStepResult,
   describeDoneStep,
   describeSkippedManual,
   describeSyncFailure,
   describeSyncResult,
   hasSyncSecret,
-  isAutoDoneEnabled,
   isAutoEnabled,
   recordAttempt,
   recordCheck,
   recordRunStart,
   recoverInterruptedState,
+  resolveMarkDoneSetting,
   shouldRunAuto,
 } from "./auto-sync.js";
 import {
@@ -250,21 +253,9 @@ async function performWatchLaterSync({ background = false } = {}) {
   }
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== "SYNC_WATCH_LATER") return undefined;
-
-  performWatchLaterSync()
-    .then(sendResponse)
-    .catch((error) => {
-      sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
-    });
-
-  return true;
-});
-
 // ---------------------------------------------------------------------------
-// Sync Done to YouTube (manual only). Nothing here runs unless the popup sends
-// DONE_SYNC_PREVIEW and then DONE_SYNC_START after the user confirms.
+// Done-to-YouTube marking. Sync now and the daily auto-sync share the capped
+// run; the popup can cancel a run that is already in progress.
 // ---------------------------------------------------------------------------
 
 const JOB_KEY = "doneSyncJob";
@@ -460,45 +451,10 @@ async function runDoneSync({ maxVideos = Infinity } = {}) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  const type = message?.type;
-  if (!["DONE_SYNC_PREVIEW", "DONE_SYNC_START", "DONE_SYNC_CANCEL", "DONE_SYNC_CLEAR_SKIPPED"].includes(type)) {
-    return undefined;
-  }
-
-  (async () => {
-    if (type === "DONE_SYNC_PREVIEW") return previewDoneSync();
-    if (type === "DONE_SYNC_CANCEL") {
-      cancelRequested = true;
-      await closeWindow(currentWindowId);
-      return { ok: true };
-    }
-    if (type === "DONE_SYNC_CLEAR_SKIPPED") {
-      await chrome.storage.local.remove([SKIPPED_KEY]);
-      return { ok: true };
-    }
-    // DONE_SYNC_START: only with an explicit confirmation from the popup.
-    if (message.confirmed !== true) throw new Error("Confirmation required.");
-    if (jobActive) throw new Error("A Done sync is already running.");
-    jobActive = true;
-    cancelRequested = false;
-    runDoneSync().catch(async (error) => {
-      jobActive = false;
-      await saveJob({
-        state: "interrupted",
-        total: 0,
-        index: 0,
-        current: null,
-        ok: [],
-        failed: [{ id: "-", reason: "error", detail: error instanceof Error ? error.message : String(error) }],
-        skipped: [],
-        cancelRequested: false,
-        startedAt: Date.now(),
-        finishedAt: Date.now(),
-      });
-    });
-    return { ok: true };
-  })()
-    .then(sendResponse)
+  if (message?.type !== "DONE_SYNC_CANCEL") return undefined;
+  cancelRequested = true;
+  closeWindow(currentWindowId)
+    .then(() => sendResponse({ ok: true }))
     .catch((error) => {
       sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
     });
@@ -508,8 +464,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 // ---------------------------------------------------------------------------
 // Automatic daily sync. An hourly alarm checks whether a successful run is more
 // than ~20 h old; a startup alarm catches up after the browser was closed.
-// Every run: (1) the normal scrape + upload in an inactive tab, (2) optionally,
-// only if the user switched it on, the capped Done-to-YouTube step.
+// Every run: (1) the normal scrape + upload in an inactive tab, (2) the capped
+// Done-to-YouTube step, unless the Mark Done toggle is off.
 // ---------------------------------------------------------------------------
 
 const AUTO_ALARM = "autoSyncCheck";
@@ -517,12 +473,11 @@ const AUTO_STARTUP_ALARM = "autoSyncStartup";
 const AUTO_STATE_KEY = "autoSync";
 const AUTO_LOCK_KEY = "autoSyncLockAt";
 const AUTO_ENABLED_KEY = "autoSyncEnabled";
-const AUTO_DONE_KEY = "autoDoneEnabled";
 
 // A service worker restart kills in-flight work. A Done job must not stay
 // "running", and an auto-sync lock (or a start with no result) means the run
 // died before the library accepted a POST. Record that, or the popup keeps
-// showing the previous line and Run now looks like it never happened.
+// showing the previous line and Sync now looks like it never happened.
 const booted = (async () => {
   const stored = await chrome.storage.local.get([JOB_KEY, AUTO_STATE_KEY, AUTO_LOCK_KEY]);
   const job = stored[JOB_KEY];
@@ -546,9 +501,9 @@ async function ensureAlarms() {
   }
 }
 
-async function runAuto(trigger, { force = false } = {}) {
+async function runAuto(trigger, { force = false, background = trigger !== "manual", onScrape } = {}) {
   // Extension API calls keep the worker alive after the popup closes. Start
-  // this before the first await so a Run now cannot die as "never started".
+  // this before the first await so a Sync now cannot die as "never started".
   const keepAlive = setInterval(() => void chrome.runtime.getPlatformInfo(), 20000);
   try {
     await booted;
@@ -556,9 +511,12 @@ async function runAuto(trigger, { force = false } = {}) {
       AUTO_STATE_KEY,
       AUTO_LOCK_KEY,
       AUTO_ENABLED_KEY,
-      AUTO_DONE_KEY,
+      MARK_DONE_KEY,
+      LEGACY_AUTO_DONE_KEY,
       "syncSecret",
     ]);
+    const markDone = resolveMarkDoneSetting(stored);
+    if (markDone.migrated) await chrome.storage.local.set(markDone.migrated);
     const now = Date.now();
     const decision = shouldRunAuto({
       enabled: isAutoEnabled(stored[AUTO_ENABLED_KEY]),
@@ -593,34 +551,78 @@ async function runAuto(trigger, { force = false } = {}) {
     let partial = false;
     let text = "";
     try {
-      const result = await performWatchLaterSync({ background: true });
+      const result = await performWatchLaterSync({ background });
       ok = true;
       // An incomplete scrape uploaded fine but did not read the whole playlist,
       // so it is retried on the short backoff instead of 20 h later.
       partial = result.partial === true;
       text = `Sync: ${describeSyncResult(result)}`;
-      if (isAutoDoneEnabled(stored[AUTO_DONE_KEY])) {
+
+      let markingCount = 0;
+      let attemptDone = false;
+      if (markDone.enabled) {
+        try {
+          const preview = await previewDoneSync();
+          markingCount = Math.min(preview.count, AUTO_DONE_CAP);
+          attemptDone = markingCount > 0;
+        } catch {
+          // Still attempt the Done step; the popup just will not know the count yet.
+          attemptDone = true;
+        }
+      }
+      if (markingCount > 0) text += `. Marking ${markingCount} watched…`;
+      else if (attemptDone) text += ". Marking watched…";
+
+      // Record the scrape before the Done step so a worker killed mid-mark
+      // does not look like the upload never happened.
+      const afterScrape = await chrome.storage.local.get([AUTO_STATE_KEY]);
+      await chrome.storage.local.set({
+        [AUTO_STATE_KEY]: recordAttempt(afterScrape[AUTO_STATE_KEY], {
+          ok,
+          partial,
+          text,
+          now: Date.now(),
+          trigger,
+        }),
+      });
+      if (typeof onScrape === "function") {
+        onScrape({ ok: true, ...result, markingCount, marking: attemptDone, text });
+      }
+
+      if (attemptDone) {
+        let doneText = "";
         if (jobActive) {
-          text += ". Done step skipped: another Done sync is running";
+          doneText = "Done step skipped: another Done sync is running";
         } else {
           try {
             jobActive = true;
             cancelRequested = false;
             const job = await runDoneSync({ maxVideos: AUTO_DONE_CAP });
-            text += `. ${describeDoneStep(job)}`;
+            doneText = describeDoneStep(job);
           } catch (error) {
             jobActive = false;
-            text += `. Done step failed: ${describeSyncFailure(error)}`;
+            doneText = `Done step failed: ${describeSyncFailure(error)}`;
           }
         }
+        const latest = await chrome.storage.local.get([AUTO_STATE_KEY]);
+        await chrome.storage.local.set({
+          [AUTO_STATE_KEY]: appendDoneStepResult(latest[AUTO_STATE_KEY], doneText),
+        });
+        text = appendDoneStepResult({ lastResult: { text } }, doneText).lastResult.text;
       }
     } catch (error) {
       text = describeSyncFailure(error);
-    } finally {
       const latest = await chrome.storage.local.get([AUTO_STATE_KEY]);
       await chrome.storage.local.set({
-        [AUTO_STATE_KEY]: recordAttempt(latest[AUTO_STATE_KEY], { ok, partial, text, now: Date.now(), trigger }),
+        [AUTO_STATE_KEY]: recordAttempt(latest[AUTO_STATE_KEY], {
+          ok: false,
+          partial: false,
+          text,
+          now: Date.now(),
+          trigger,
+        }),
       });
+    } finally {
       await chrome.storage.local.remove([AUTO_LOCK_KEY]);
     }
     return { ok, partial, text };
@@ -648,25 +650,29 @@ chrome.runtime.onStartup.addListener(() => {
 void ensureAlarms();
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== "AUTO_RUN_NOW") return undefined;
+  if (message?.type !== "SYNC_NOW") return undefined;
   // Stay alive until the run records a result. Returning true keeps the
   // message channel open, which is what stops Arc from suspending the worker
-  // the moment the popup's listener returns.
-  runAuto("manual", { force: true })
+  // the moment the popup's listener returns. onScrape replies as soon as the
+  // library accepts the scrape, so the popup can show that result while the
+  // Done step continues in the background.
+  let replied = false;
+  const reply = (payload) => {
+    if (replied) return;
+    replied = true;
+    try {
+      sendResponse(payload);
+    } catch {
+      // The popup was closed; the result is already in storage.
+    }
+  };
+  runAuto("manual", { force: true, background: false, onScrape: reply })
     .then((result) => {
-      try {
-        sendResponse(result);
-      } catch {
-        // The popup was closed; the result is already in storage.
-      }
+      reply(result);
     })
     .catch((error) => {
       const text = describeSyncFailure(error);
-      try {
-        sendResponse({ ok: false, error: text, text });
-      } catch {
-        // popup closed
-      }
+      reply({ ok: false, error: text, text });
     });
   return true;
 });

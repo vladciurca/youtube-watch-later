@@ -143,7 +143,7 @@ assert.equal(reasonLabel("age_restricted"), "age-restricted");
 
 // ---- manifest + safety wiring
 const manifest = JSON.parse(ext("manifest.json"));
-assert.equal(manifest.version, "1.5.3");
+assert.equal(manifest.version, "1.6.0");
 assert.deepEqual(manifest.permissions, ["storage", "tabs", "scripting", "alarms"], "only alarms is new");
 assert.ok(manifest.host_permissions.includes("https://www.youtube.com/*"));
 const bg = ext("background.js");
@@ -151,14 +151,16 @@ assert.match(bg, /unavailableCount/);
 assert.match(bg, /paginationExhausted/);
 assert.match(bg, /doneNeedsYouTubeMark/);
 assert.match(bg, /regressedIds/);
-assert.match(bg, /message\.confirmed !== true/, "start needs explicit confirmation");
-assert.match(bg, /isAutoDoneEnabled\(stored\[AUTO_DONE_KEY\]\)/, "unattended Done step only runs when the user opted in");
-assert.match(bg, /runDoneSync\(\{ maxVideos: AUTO_DONE_CAP \}\)/, "unattended Done step is capped");
-assert.equal((bg.match(/runDoneSync\(\)/g) || []).length, 1, "the uncapped Done run only starts from the confirmed handler");
+assert.equal(/message\.confirmed !== true/.test(bg), false, "no confirmation gate; Sync now and auto-sync share the capped Done step");
+assert.match(bg, /resolveMarkDoneSetting\(stored\)/, "Done step follows the migrated Mark Done setting");
+assert.match(bg, /runDoneSync\(\{ maxVideos: AUTO_DONE_CAP \}\)/, "the Done step is capped");
+assert.equal(/runDoneSync\(\s*\)/.test(bg), false, "no uncapped Done run");
 assert.match(bg, /focused: false/, "videos open in an unfocused popup window");
 assert.match(bg, /muted: true/);
-assert.match(ext("popup.js"), /DONE_SYNC_PREVIEW/);
-assert.match(ext("popup.html"), /Sync Done to YouTube/);
+assert.equal(/DONE_SYNC_PREVIEW/.test(ext("popup.js")), false, "the manual Done preview is gone");
+assert.equal(/Sync Done to YouTube/.test(ext("popup.html")), false, "the separate Sync Done button is gone");
+assert.match(ext("popup.html"), />Sync now</);
+assert.match(ext("popup.js"), /DONE_SYNC_CANCEL/, "the popup can still cancel a marking run");
 const runner = ext("mark-watched.js");
 assert.ok(!/fetch\(|XMLHttpRequest|sendBeacon|youtubei/.test(runner), "no network calls or YouTube internals in the page runner");
 assert.match(runner, /currentTime = seekTarget/);
@@ -279,4 +281,4 @@ const watchUrl = (id) => `https://www.youtube.com/watch?v=${id}`;
   assert.equal(h.classifyErrorText("Playback on other websites has been disabled"), null);
 }
 
-console.log("done-sync tests: selection (94/95/100, dropped, synced, skipped), seek target, job bookkeeping, no new permissions, manual-only wiring, page runner (ok/live/unavailable/age/private/ad/stall/navigated) ok");
+console.log("done-sync tests: selection (94/95/100, dropped, synced, skipped), seek target, job bookkeeping, no new permissions, capped shared Done step, page runner (ok/live/unavailable/age/private/ad/stall/navigated) ok");

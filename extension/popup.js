@@ -1,13 +1,14 @@
 import {
   AUTO_STALE_LOCK_MS,
+  LEGACY_AUTO_DONE_KEY,
+  MARK_DONE_KEY,
   describeAutoStatus,
+  describeMarkingStatus,
   describeSyncFailure,
   hasSyncSecret,
-  isAutoDoneEnabled,
   isAutoEnabled,
-  recordAttempt,
+  resolveMarkDoneSetting,
 } from "./auto-sync.js";
-import { reasonLabel, summarizeJob } from "./done-sync.js";
 import { POPUP_WIDTH, popupZoomForViewport } from "./popup-fit.js";
 
 function fitPopupToViewport() {
@@ -31,19 +32,24 @@ const apiUrl = document.getElementById("apiUrl");
 const syncSecret = document.getElementById("syncSecret");
 const syncButton = document.getElementById("sync");
 const status = document.getElementById("status");
+const doneCancel = document.getElementById("doneCancel");
 
 function setStatus(text, kind) {
   status.textContent = text;
   status.classList.toggle("is-error", kind === "error");
   status.classList.toggle("is-ok", kind === "ok");
+  fitPopupToViewport();
 }
 
 const RESET_DROPPED_PENDING_KEY = "resetDroppedPending";
+const JOB_KEY = "doneSyncJob";
 
 const stored = await chrome.storage.local.get([
   "apiUrl",
   "syncSecret",
   RESET_DROPPED_PENDING_KEY,
+  MARK_DONE_KEY,
+  LEGACY_AUTO_DONE_KEY,
 ]);
 apiUrl.value = stored.apiUrl || DEFAULT_API;
 syncSecret.value = stored.syncSecret || "";
@@ -53,6 +59,9 @@ if (resetPending) {
     "Next sync restores videos marked Dropped after the first-page-only scrape. A full Watch Later scrape then marks Dropped only for videos missing from YouTube.",
   );
 }
+
+const migratedMark = resolveMarkDoneSetting(stored);
+if (migratedMark.migrated) await chrome.storage.local.set(migratedMark.migrated);
 
 async function persist() {
   await chrome.storage.local.set({
@@ -64,144 +73,88 @@ async function persist() {
 apiUrl.addEventListener("change", () => void persist());
 syncSecret.addEventListener("change", () => void persist());
 
+function formatScrapeStatus(result) {
+  if (result.resetDropped === true) {
+    resetPending = false;
+  }
+  const restored =
+    result.resetDropped === true
+      ? `Restored ${result.clearedDropped ?? 0} Dropped stamps from the first-page scrape. `
+      : "";
+  const scrapedCount = result.scraped ?? result.upserted;
+  const stated = Number(result.statedCount);
+  const ofStated =
+    Number.isFinite(stated) && stated > 0 ? ` of ${stated} (stated)` : "";
+  const method = result.method ? `, method ${result.method}` : "";
+  return result.partial
+    ? `${restored}Scraped ${scrapedCount}${ofStated}${method}. The scrape looked incomplete, so previous Watch Later entries were kept. Sync again, then refresh the library.`
+    : `${restored}Scraped ${scrapedCount}${ofStated}${method}. ${result.dropped} marked Dropped. Refresh the library.`;
+}
+
+let lastScrapeStatus = "";
+let lastScrapeKind = "";
+
+function showScrapeAndMarking(job, markingCount) {
+  const parts = [];
+  if (lastScrapeStatus) parts.push(lastScrapeStatus);
+  const marking =
+    describeMarkingStatus(job) ||
+    (markingCount > 0 && (!job || job.state === "idle" || job.state === "running")
+      ? `Marking ${markingCount} watched…`
+      : job?.state === "running"
+        ? "Marking watched…"
+        : "");
+  if (marking) parts.push(marking);
+  if (parts.length) setStatus(parts.join("\n"), lastScrapeKind || undefined);
+  doneCancel.hidden = job?.state !== "running";
+  fitPopupToViewport();
+}
+
 syncButton.addEventListener("click", async () => {
   await persist();
   syncButton.disabled = true;
+  doneCancel.hidden = true;
+  let holdForMarking = false;
   setStatus(
     resetPending
       ? "Opening Watch Later… Restoring Dropped from the incomplete first-page scrape, then merging."
       : "Opening Watch Later and scraping progress…",
   );
   try {
-    const result = await chrome.runtime.sendMessage({ type: "SYNC_WATCH_LATER" });
-    if (!result?.ok) {
-      throw new Error(result?.error || "Sync failed");
+    const result = await chrome.runtime.sendMessage({ type: "SYNC_NOW" });
+    if (!result) {
+      throw new Error("Run never started");
     }
-    if (result.resetDropped === true) {
-      resetPending = false;
-    }
-    const restored =
-      result.resetDropped === true
-        ? `Restored ${result.clearedDropped ?? 0} Dropped stamps from the first-page scrape. `
-        : "";
-    const scrapedCount = result.scraped ?? result.upserted;
-    const stated = Number(result.statedCount);
-    const ofStated =
-      Number.isFinite(stated) && stated > 0 ? ` of ${stated} (stated)` : "";
-    const method = result.method ? `, method ${result.method}` : "";
-    setStatus(
-      result.partial
-        ? `${restored}Scraped ${scrapedCount}${ofStated}${method}. The scrape looked incomplete, so previous Watch Later entries were kept. Sync again, then refresh the library.`
-        : `${restored}Scraped ${scrapedCount}${ofStated}${method}. ${result.dropped} marked Dropped. Refresh the library.`,
-      "ok",
-    );
-  } catch (error) {
-    setStatus(error instanceof Error ? error.message : String(error), "error");
-  } finally {
-    syncButton.disabled = false;
-  }
-});
-
-// ---------------------------------------------------------------------------
-// Sync Done to YouTube (manual; always asks before starting)
-// ---------------------------------------------------------------------------
-
-const JOB_KEY = "doneSyncJob";
-const SKIPPED_KEY = "doneSyncSkipped";
-const doneSyncButton = document.getElementById("doneSync");
-const doneConfirm = document.getElementById("doneConfirm");
-const doneConfirmText = document.getElementById("doneConfirmText");
-const doneStart = document.getElementById("doneStart");
-const doneCancelConfirm = document.getElementById("doneCancelConfirm");
-const doneProgress = document.getElementById("doneProgress");
-const doneProgressText = document.getElementById("doneProgressText");
-const doneCancel = document.getElementById("doneCancel");
-const doneRetry = document.getElementById("doneRetry");
-
-function describeJob(job) {
-  let text = summarizeJob(job);
-  if (job.state === "running" && job.current?.title) {
-    text += `\nNow: ${job.current.title}`;
-  }
-  if (job.state !== "running") {
-    if (job.total === 0 && job.failed[0]?.detail) text = `Could not start: ${job.failed[0].detail}`;
-    const details = [...job.failed, ...job.skipped]
-      .slice(0, 4)
-      .map((item) => `${item.id}: ${reasonLabel(item.reason)}`);
-    if (details.length) text += `\n${details.join("\n")}`;
-  }
-  return text;
-}
-
-async function renderDoneJob() {
-  const stored = await chrome.storage.local.get([JOB_KEY, SKIPPED_KEY]);
-  const job = stored[JOB_KEY];
-  const running = job?.state === "running";
-  doneProgress.hidden = !job || job.state === "idle";
-  doneProgressText.style.whiteSpace = "pre-line";
-  doneProgressText.textContent = job ? describeJob(job) : "";
-  doneCancel.hidden = !running;
-  doneSyncButton.disabled = running;
-  const skippedCount = Object.keys(stored[SKIPPED_KEY] ?? {}).length;
-  doneRetry.hidden = running || skippedCount === 0;
-  doneRetry.textContent = `Retry ${skippedCount} skipped video${skippedCount === 1 ? "" : "s"}`;
-}
-
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && (changes[JOB_KEY] || changes[SKIPPED_KEY])) void renderDoneJob();
-});
-await renderDoneJob();
-
-doneSyncButton.addEventListener("click", async () => {
-  await persist();
-  doneSyncButton.disabled = true;
-  doneConfirm.hidden = true;
-  setStatus("Checking which Done videos still need syncing…");
-  try {
-    const preview = await chrome.runtime.sendMessage({ type: "DONE_SYNC_PREVIEW" });
-    if (!preview?.ok) throw new Error(preview?.error || "Could not read the Done list");
-    if (preview.count === 0) {
-      setStatus(
-        `Nothing to sync. ${preview.totalDone} marked Done in the library; the rest are already watched on YouTube, already synced, or skipped.`,
-        "ok",
-      );
+    if (result.ok === false) {
+      lastScrapeStatus = "";
+      lastScrapeKind = "error";
+      setStatus(result.text || result.error || "Sync now failed before the library accepted it.", "error");
       return;
     }
-    const c = preview.counts;
-    const skipNote = [
-      c.alreadyWatched ? `${c.alreadyWatched} already watched` : "",
-      c.alreadySynced ? `${c.alreadySynced} already synced` : "",
-      c.previouslySkipped ? `${c.previouslySkipped} skipped before` : "",
-    ]
-      .filter(Boolean)
-      .join(", ");
-    doneConfirmText.textContent =
-      `Mark ${preview.count} video${preview.count === 1 ? "" : "s"} as watched on YouTube?` +
-      (skipNote ? ` (Skipping ${skipNote}.)` : "") +
-      " Each one opens in a small muted window for about 15–30 seconds, one at a time, then closes. Please do not use that window.";
-    doneConfirm.hidden = false;
-    setStatus("");
+    if (result.scraped != null || result.upserted != null || result.method) {
+      lastScrapeStatus = formatScrapeStatus(result);
+      lastScrapeKind = result.partial ? "error" : "ok";
+    } else if (result.text) {
+      lastScrapeStatus = result.text;
+      lastScrapeKind = result.partial ? "error" : "ok";
+    }
+    const jobStored = await chrome.storage.local.get([JOB_KEY]);
+    showScrapeAndMarking(jobStored[JOB_KEY], result.markingCount || 0);
+    if (result.marking || (result.markingCount || 0) > 0) {
+      // Keep the button disabled while the Done step is in flight, even if
+      // the job has not been written to storage yet.
+      holdForMarking = true;
+      return;
+    }
   } catch (error) {
-    setStatus(error instanceof Error ? error.message : String(error), "error");
+    lastScrapeStatus = "";
+    lastScrapeKind = "error";
+    setStatus(describeSyncFailure(error), "error");
   } finally {
-    doneSyncButton.disabled = false;
-    void renderDoneJob();
-  }
-});
-
-doneCancelConfirm.addEventListener("click", () => {
-  doneConfirm.hidden = true;
-});
-
-doneStart.addEventListener("click", async () => {
-  doneConfirm.hidden = true;
-  setStatus("Starting…");
-  try {
-    const result = await chrome.runtime.sendMessage({ type: "DONE_SYNC_START", confirmed: true });
-    if (!result?.ok) throw new Error(result?.error || "Could not start");
-    setStatus("");
-  } catch (error) {
-    setStatus(error instanceof Error ? error.message : String(error), "error");
+    const jobStored = await chrome.storage.local.get([JOB_KEY]);
+    if (!holdForMarking && jobStored[JOB_KEY]?.state !== "running") {
+      syncButton.disabled = false;
+    }
   }
 });
 
@@ -211,20 +164,21 @@ doneCancel.addEventListener("click", async () => {
   doneCancel.disabled = false;
 });
 
-doneRetry.addEventListener("click", async () => {
-  await chrome.runtime.sendMessage({ type: "DONE_SYNC_CLEAR_SKIPPED" });
-  setStatus("Skipped videos will be included next time. Click Sync Done to YouTube.");
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes[JOB_KEY]) return;
+  const job = changes[JOB_KEY].newValue;
+  showScrapeAndMarking(job);
+  if (job?.state !== "running") syncButton.disabled = false;
 });
 
 // ---------------------------------------------------------------------------
-// Automatic daily sync (toggle, Run now, last result)
+// Automatic daily sync (toggle, schedule, last result)
 // ---------------------------------------------------------------------------
 
 const AUTO_STATE_KEY = "autoSync";
 const AUTO_LOCK_KEY = "autoSyncLockAt";
 const autoEnabled = document.getElementById("autoEnabled");
-const autoDone = document.getElementById("autoDone");
-const autoRun = document.getElementById("autoRun");
+const markDone = document.getElementById("markDone");
 const autoStatus = document.getElementById("autoStatus");
 
 async function renderAuto() {
@@ -232,14 +186,14 @@ async function renderAuto() {
     AUTO_STATE_KEY,
     AUTO_LOCK_KEY,
     "autoSyncEnabled",
-    "autoDoneEnabled",
+    MARK_DONE_KEY,
+    LEGACY_AUTO_DONE_KEY,
     "syncSecret",
   ]);
   autoEnabled.checked = isAutoEnabled(stored.autoSyncEnabled);
-  autoDone.checked = isAutoDoneEnabled(stored.autoDoneEnabled);
-  autoDone.disabled = !autoEnabled.checked;
-  const running = !!stored[AUTO_LOCK_KEY] && Date.now() - stored[AUTO_LOCK_KEY] < AUTO_STALE_LOCK_MS;
-  autoRun.disabled = running;
+  const resolved = resolveMarkDoneSetting(stored);
+  if (resolved.migrated) await chrome.storage.local.set(resolved.migrated);
+  markDone.checked = resolved.enabled;
   autoStatus.style.whiteSpace = "pre-line";
   const lastResult = stored[AUTO_STATE_KEY]?.lastResult;
   autoStatus.classList.toggle("is-error", !!lastResult && lastResult.ok === false && !lastResult.pending);
@@ -250,43 +204,22 @@ async function renderAuto() {
     auto: stored[AUTO_STATE_KEY],
     lockAt: stored[AUTO_LOCK_KEY],
   });
+  const running = !!stored[AUTO_LOCK_KEY] && Date.now() - stored[AUTO_LOCK_KEY] < AUTO_STALE_LOCK_MS;
+  if (running) syncButton.disabled = true;
+  const jobStored = await chrome.storage.local.get([JOB_KEY]);
+  if (jobStored[JOB_KEY]?.state === "running") {
+    syncButton.disabled = true;
+    showScrapeAndMarking(jobStored[JOB_KEY]);
+  }
+  fitPopupToViewport();
 }
 
 autoEnabled.addEventListener("change", async () => {
   await chrome.storage.local.set({ autoSyncEnabled: autoEnabled.checked });
   await renderAuto();
 });
-autoDone.addEventListener("change", async () => {
-  await chrome.storage.local.set({ autoDoneEnabled: autoDone.checked });
-});
-autoRun.addEventListener("click", async () => {
-  await persist();
-  autoRun.disabled = true;
-  setStatus("Starting Run now…");
-  try {
-    const result = await chrome.runtime.sendMessage({ type: "AUTO_RUN_NOW" });
-    if (!result) {
-      throw new Error("Run never started");
-    }
-    if (result.ok === false) {
-      setStatus(result.text || result.error || "Run now failed before the library accepted it.", "error");
-    } else if (result.text) {
-      setStatus(result.text, result.partial ? "error" : "ok");
-    }
-  } catch (error) {
-    const text = describeSyncFailure(error);
-    const current = await chrome.storage.local.get([AUTO_STATE_KEY]);
-    await chrome.storage.local.set({
-      [AUTO_STATE_KEY]: recordAttempt(current[AUTO_STATE_KEY], {
-        ok: false,
-        text,
-        now: Date.now(),
-        trigger: "manual",
-      }),
-    });
-    setStatus(text, "error");
-  }
-  await renderAuto();
+markDone.addEventListener("change", async () => {
+  await chrome.storage.local.set({ [MARK_DONE_KEY]: markDone.checked });
 });
 chrome.storage.onChanged.addListener((changes, area) => {
   if (
@@ -294,7 +227,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
     (changes[AUTO_STATE_KEY] ||
       changes[AUTO_LOCK_KEY] ||
       changes.autoSyncEnabled ||
-      changes.autoDoneEnabled ||
+      changes[MARK_DONE_KEY] ||
+      changes[LEGACY_AUTO_DONE_KEY] ||
       changes.syncSecret)
   ) {
     void renderAuto();

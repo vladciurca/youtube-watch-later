@@ -18,9 +18,31 @@ export function hasSyncSecret(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-/** The unattended Done step is opt-in. */
-export function isAutoDoneEnabled(value) {
-  return value === true;
+export const MARK_DONE_KEY = "markDoneOnYouTube";
+export const LEGACY_AUTO_DONE_KEY = "autoDoneEnabled";
+
+/** Mark Done videos watched on YouTube, unless the user turned it off. */
+export function isMarkDoneEnabled(value) {
+  return value !== false;
+}
+
+/**
+ * Resolve the Mark Done toggle from storage and migrate the 1.5.x
+ * autoDoneEnabled flag. The new key wins if both are present. A stored
+ * autoDoneEnabled (true or false) is copied as-is; otherwise the default is on.
+ * `migrated` is a storage patch to persist, or null when nothing needs writing.
+ */
+export function resolveMarkDoneSetting(stored = {}) {
+  const has = (key) =>
+    Object.prototype.hasOwnProperty.call(stored, key) && stored[key] !== undefined;
+  if (has(MARK_DONE_KEY)) {
+    return { enabled: isMarkDoneEnabled(stored[MARK_DONE_KEY]), migrated: null };
+  }
+  if (has(LEGACY_AUTO_DONE_KEY)) {
+    const enabled = stored[LEGACY_AUTO_DONE_KEY] === true;
+    return { enabled, migrated: { [MARK_DONE_KEY]: enabled } };
+  }
+  return { enabled: true, migrated: { [MARK_DONE_KEY]: true } };
 }
 
 function past(ts, now) {
@@ -171,7 +193,7 @@ export function describeAutoStatus({
   } else if (!hasSecret) {
     lines.push("Next sync: never — no sync secret is saved. Enter it above.");
   } else if (!enabled) {
-    lines.push("Next sync: never — auto-sync is off. Run now still works.");
+    lines.push("Next sync: never — auto-sync is off. Sync now still works.");
   } else if (decision.run) {
     lines.push("Next sync due now — the hourly check runs it within the hour.");
   } else {
@@ -214,7 +236,7 @@ export function describeSyncResult(result) {
 }
 
 /**
- * One specific sentence for a Run now / auto run that never got an accepted
+ * One specific sentence for a Sync now / auto run that never got an accepted
  * POST. Used by the service worker (stored in lastResult) and the popup.
  */
 export function describeSyncFailure(error) {
@@ -259,20 +281,20 @@ export function describeSyncFailure(error) {
     return "Run never started: the extension background did not respond. Reload Watch Later Sync on the extensions page and try again.";
   }
   if (/no sync secret|set the sync secret/i.test(message)) {
-    return "No sync secret is saved, so Run now did not start. Enter it in this popup (same value as Vercel SYNC_SECRET).";
+    return "No sync secret is saved, so Sync now did not start. Enter it in this popup (same value as Vercel SYNC_SECRET).";
   }
   return message || "Sync failed before the library accepted it. Nothing was uploaded.";
 }
 
-/** Why a manual Run now was refused before any scrape started. */
+/** Why a manual Sync now was refused before any scrape started. */
 export function describeSkippedManual(reason) {
   if (reason === "no_secret") {
-    return "No sync secret is saved, so Run now did not start. Enter it in this popup (same value as Vercel SYNC_SECRET).";
+    return "No sync secret is saved, so Sync now did not start. Enter it in this popup (same value as Vercel SYNC_SECRET).";
   }
   if (reason === "running") {
-    return "Run now did not start: another sync is already marked in progress.";
+    return "Sync now did not start: another sync is already marked in progress.";
   }
-  return `Run now did not start (${skipReasonText(reason)}).`;
+  return `Sync now did not start (${skipReasonText(reason)}).`;
 }
 
 /**
@@ -306,6 +328,13 @@ export function recoverInterruptedState(auto, lockAt, now) {
   const lock = typeof lockAt === "number" && Number.isFinite(lockAt) && lockAt > 0;
   const pending = auto?.lastResult?.pending === true;
   if (!lock && !pending) return null;
+  // The scrape already landed; only the background Done step was in flight.
+  if (!pending && auto?.lastResult?.ok === true) {
+    return appendDoneStepResult(
+      auto,
+      "Done step did not finish: the browser stopped the extension.",
+    );
+  }
   return recordAttempt(auto, {
     ok: false,
     text: "Run never finished: the browser stopped the extension before the library accepted the sync. Nothing was uploaded.",
@@ -314,11 +343,38 @@ export function recoverInterruptedState(auto, lockAt, now) {
   });
 }
 
-/** Text for the optional Done step, from the finished job. */
+/** Replace a trailing "Marking N watched…" line with the finished Done-step text. */
+export function appendDoneStepResult(auto, doneText) {
+  const prev = auto || {};
+  const last = prev.lastResult || {};
+  const base = String(last.text || "").replace(/\. Marking \d+ watched…$/, "");
+  const extra = String(doneText || "").trim();
+  return {
+    ...prev,
+    lastResult: {
+      ...last,
+      text: extra ? (base ? `${base}. ${extra}` : extra) : base,
+    },
+  };
+}
+
+/** Text for the Done step, from the finished job. */
 export function describeDoneStep(job) {
   if (!job) return "Done step did not run";
   const parts = [`${job.ok?.length ?? 0} marked watched`];
   if (job.skipped?.length) parts.push(`${job.skipped.length} skipped`);
   if (job.failed?.length) parts.push(`${job.failed.length} failed`);
   return `Done step: ${parts.join(", ")}`;
+}
+
+/** In-progress status for the background Done step, then the finished line. */
+export function describeMarkingStatus(job) {
+  if (!job || job.state === "idle") return "";
+  if (job.state === "running") {
+    const remaining = Math.max(0, (job.total ?? 0) - (job.index ?? 0));
+    const n = remaining > 0 ? remaining : job.total;
+    if (!n) return "Marking watched…";
+    return `Marking ${n} watched…`;
+  }
+  return describeDoneStep(job);
 }
