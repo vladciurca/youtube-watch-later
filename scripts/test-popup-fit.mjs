@@ -21,6 +21,6 @@ assert.match(popupJs, /from "\.\/popup-fit\.js"/);
 assert.match(popupJs, /addEventListener\("resize", fitPopupToViewport\)/);
 
 const manifest = JSON.parse(readFileSync(join(root, "../extension/manifest.json"), "utf8"));
-assert.equal(manifest.version, "1.5.3");
+assert.equal(manifest.version, "1.6.0");
 
 console.log("test-popup-fit: ok");

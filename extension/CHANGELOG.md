@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.0
+
+- One primary **Sync now** button: it refreshes the Watch Later list first and shows that result immediately, then marks Done videos watched on YouTube in the background (same cap of 5, with a short "Marking 3 watched…" status). The separate **Run now** and **Sync Done to YouTube** buttons are gone.
+- Automatic daily sync always does both steps, unless the **Mark Done videos watched on YouTube** toggle is off. That toggle defaults on. A saved `autoDoneEnabled` value from 1.5.x is migrated as-is (on stays on, off stays off).
+- Sticky Done, scrape completeness, the 80% guard, and the popup-fit zoom are unchanged.
+
+
 ## 1.5.3
 
 - Fix the popup clipping down the middle in Arc on macOS. Arc opens the popup as a native window, and a Retina / custom-scaling / browser-zoom mismatch was painting the 320px layout at 2x inside a 1x-sized window, so labels, fields, and the Sync button were cut in half and the Automatic sync block sat in the empty lower half. The popup now sizes to the real viewport (and can scroll if it is still short).

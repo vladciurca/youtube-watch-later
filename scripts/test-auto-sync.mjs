@@ -14,14 +14,18 @@ import {
   describeSkippedManual,
   describeSyncFailure,
   describeSyncResult,
+  appendDoneStepResult,
+  describeMarkingStatus,
   hasSyncSecret,
-  isAutoDoneEnabled,
   isAutoEnabled,
+  isMarkDoneEnabled,
+  MARK_DONE_KEY,
   nextDueAt,
   recordAttempt,
   recordCheck,
   recordRunStart,
   recoverInterruptedState,
+  resolveMarkDoneSetting,
   shouldRunAuto,
 } from "../extension/auto-sync.js";
 
@@ -35,8 +39,27 @@ const base = { enabled: true, now: NOW, hasSecret: true };
 assert.equal(isAutoEnabled(undefined), true, "auto-sync defaults on");
 assert.equal(isAutoEnabled(true), true);
 assert.equal(isAutoEnabled(false), false);
-assert.equal(isAutoDoneEnabled(undefined), false, "unattended Done step defaults off");
-assert.equal(isAutoDoneEnabled(true), true);
+assert.equal(isMarkDoneEnabled(undefined), true, "Mark Done defaults on");
+assert.equal(isMarkDoneEnabled(true), true);
+assert.equal(isMarkDoneEnabled(false), false);
+assert.deepEqual(resolveMarkDoneSetting({}), { enabled: true, migrated: { [MARK_DONE_KEY]: true } });
+assert.deepEqual(resolveMarkDoneSetting({ [MARK_DONE_KEY]: true }), { enabled: true, migrated: null });
+assert.deepEqual(resolveMarkDoneSetting({ [MARK_DONE_KEY]: false }), { enabled: false, migrated: null });
+assert.deepEqual(
+  resolveMarkDoneSetting({ autoDoneEnabled: true }),
+  { enabled: true, migrated: { [MARK_DONE_KEY]: true } },
+  "legacy on migrates on",
+);
+assert.deepEqual(
+  resolveMarkDoneSetting({ autoDoneEnabled: false }),
+  { enabled: false, migrated: { [MARK_DONE_KEY]: false } },
+  "legacy off stays off",
+);
+assert.deepEqual(
+  resolveMarkDoneSetting({ autoDoneEnabled: true, [MARK_DONE_KEY]: false }),
+  { enabled: false, migrated: null },
+  "the new key wins when both are present",
+);
 assert.equal(AUTO_MIN_INTERVAL_MS, 20 * H);
 assert.equal(AUTO_DONE_CAP, 5);
 
@@ -51,7 +74,7 @@ assert.equal(shouldRunAuto({ ...base, enabled: false, auto: null }).reason, "dis
 assert.equal(shouldRunAuto({ ...base, hasSecret: false, auto: null }).reason, "no_secret");
 assert.equal(shouldRunAuto({ ...base, auto: null, lockAt: NOW - 60 * 1000 }).reason, "running");
 assert.equal(shouldRunAuto({ ...base, auto: null, lockAt: NOW - AUTO_STALE_LOCK_MS - 1 }).run, true, "stale lock ignored");
-// force (Run now) ignores freshness and disabled, but not running or missing secret
+// force (Sync now) ignores freshness and disabled, but not running or missing secret
 assert.equal(shouldRunAuto({ ...base, enabled: false, force: true, auto: { lastSuccessAt: NOW - H } }).run, true);
 assert.equal(shouldRunAuto({ ...base, force: true, auto: null, lockAt: NOW - 1000 }).run, false);
 assert.equal(shouldRunAuto({ ...base, force: true, hasSecret: false, auto: null }).reason, "no_secret");
@@ -177,6 +200,7 @@ assert.ok(!/Next sync due about/.test(noSecretText), "nothing is scheduled witho
 
 const offText = describeAutoStatus({ enabled: false, hasSecret: true, auto: freshState, now: NOW });
 assert.match(offText, /auto-sync is off/i);
+assert.match(offText, /Sync now still works/);
 
 const runningText = describeAutoStatus({ enabled: true, hasSecret: true, auto: freshState, lockAt: NOW - 60000, now: NOW });
 assert.match(runningText, /Running now/);
@@ -232,7 +256,7 @@ assert.match(
   describeSyncFailure(new Error("Could not establish connection. Receiving end does not exist.")),
   /Run never started/,
 );
-assert.match(describeSkippedManual("no_secret"), /No sync secret is saved, so Run now did not start/);
+assert.match(describeSkippedManual("no_secret"), /No sync secret is saved, so Sync now did not start/);
 assert.match(describeSkippedManual("running"), /did not start: another sync is already marked in progress/);
 
 const started = recordRunStart(
@@ -249,6 +273,28 @@ assert.equal(orphan.lastResult.pending, undefined);
 assert.equal(orphan.failedStreak, 1);
 assert.equal(orphan.lastSuccessAt, NOW - 30 * H, "a killed run keeps the last full sync");
 assert.equal(recoverInterruptedState({ lastResult: { ok: true, text: "fine" } }, null, NOW), null);
+const scrapeLanded = recordAttempt(null, {
+  ok: true,
+  text: "Sync: scraped 700, 3 marked Dropped. Marking 3 watched…",
+  now: NOW,
+  trigger: "manual",
+});
+const doneKilled = recoverInterruptedState(scrapeLanded, NOW - 1000, NOW + 5000);
+assert.equal(doneKilled.lastResult.ok, true, "a killed Done step keeps the scrape success");
+assert.match(doneKilled.lastResult.text, /scraped 700/);
+assert.match(doneKilled.lastResult.text, /Done step did not finish/);
+assert.ok(!/Marking 3 watched/.test(doneKilled.lastResult.text), "in-progress marking line is replaced");
+assert.deepEqual(
+  appendDoneStepResult(
+    { lastResult: { ok: true, text: "Sync: scraped 700, 3 marked Dropped. Marking 3 watched…" } },
+    "Done step: 3 marked watched",
+  ).lastResult,
+  { ok: true, text: "Sync: scraped 700, 3 marked Dropped. Done step: 3 marked watched" },
+);
+assert.equal(describeMarkingStatus({ state: "running", total: 3, index: 0, ok: [], skipped: [], failed: [] }), "Marking 3 watched…");
+assert.equal(describeMarkingStatus({ state: "running", total: 3, index: 2, ok: ["a", "b"], skipped: [], failed: [] }), "Marking 1 watched…");
+assert.equal(describeMarkingStatus({ state: "finished", ok: ["a", "b"], skipped: [], failed: [] }), "Done step: 2 marked watched");
+assert.equal(describeMarkingStatus(null), "");
 const failedVisible = describeAutoStatus({
   enabled: true,
   hasSecret: true,
@@ -267,17 +313,20 @@ assert.equal(describeDoneStep(null), "Done step did not run");
 
 // wiring in the extension
 const manifest = JSON.parse(ext("manifest.json"));
-assert.equal(manifest.version, "1.5.3");
+assert.equal(manifest.version, "1.6.0");
 assert.deepEqual(manifest.permissions, ["storage", "tabs", "scripting", "alarms"]);
 const bg = ext("background.js");
 assert.match(bg, /chrome\.alarms\.create\(AUTO_ALARM, \{ delayInMinutes: 5, periodInMinutes: 60 \}\)/);
 assert.match(bg, /onStartup/, "catch-up on browser startup");
-assert.match(bg, /performWatchLaterSync\(\{ background: true \}\)/, "unattended scrape uses an inactive tab");
+assert.match(bg, /background = trigger !== "manual"/, "unattended scrape uses an inactive tab");
+assert.match(bg, /performWatchLaterSync\(\{ background \}\)/);
+assert.match(bg, /background: false, onScrape: reply/, "Sync now focuses the Watch Later tab");
 assert.match(bg, /active: !background/);
 assert.equal((bg.match(/runAuto\(/g) || []).length >= 4, true);
 // A run reports whether the scrape was complete, so a partial one is retried sooner.
 assert.match(bg, /partial = result\.partial === true/);
-assert.match(bg, /recordAttempt\(latest\[AUTO_STATE_KEY\], \{ ok, partial,/);
+assert.match(bg, /recordAttempt\(afterScrape\[AUTO_STATE_KEY\], \{[\s\S]*ok,[\s\S]*partial,/, "the scrape result is recorded before the Done step");
+assert.match(bg, /appendDoneStepResult\(latest\[AUTO_STATE_KEY\], doneText\)/, "the Done step updates the already-recorded scrape result");
 // Every skipped check is recorded, including the unattended ones.
 assert.match(bg, /recordCheck\(stored\[AUTO_STATE_KEY\], \{ now, reason: decision\.reason \}\)/);
 assert.match(bg, /describeSyncFailure/);
@@ -286,10 +335,12 @@ assert.match(bg, /recordRunStart/);
 assert.match(bg, /recoverInterruptedState/);
 assert.match(bg, /hasSyncSecret\(stored\.syncSecret\)/);
 assert.match(bg, /await booted/);
-assert.match(bg, /runAuto\("manual", \{ force: true \}\)/);
-assert.match(bg, /AUTO_RUN_NOW"\) return undefined;[\s\S]*return true;/);
+assert.match(bg, /runAuto\("manual", \{ force: true, background: false, onScrape: reply \}\)/);
+assert.match(bg, /SYNC_NOW"\) return undefined;[\s\S]*return true;/);
+assert.match(bg, /onScrape/, "Sync now replies after the scrape, before the Done step");
 assert.match(ext("popup.js"), /describeSyncFailure/);
 assert.match(ext("popup.js"), /Run never started/);
+assert.match(ext("popup.js"), /SYNC_NOW/);
 assert.match(ext("popup.js"), /syncSecret\.value\.trim\(\)/);
 // Waiting for a tab must not miss a load that already finished, and a reused
 // Watch Later tab is reloaded so the scrape never reads a stale ytInitialData.
@@ -298,10 +349,15 @@ assert.match(bg, /chrome\.tabs\.reload\(existing\.id\)/, "a reused Watch Later t
 assert.match(bg, /fresh: true/, "after a reload, wait for the next completion");
 assert.match(bg, /tab\.discarded !== true/, "a sleeping tab never fires 'complete'");
 assert.match(ext("popup.html"), /Auto-sync daily/);
-assert.match(ext("popup.html"), /id="autoRun"/);
+assert.match(ext("popup.html"), />Sync now</);
+assert.match(ext("popup.html"), /Mark Done videos watched on YouTube/);
+assert.equal(/id="autoRun"/.test(ext("popup.html")), false, "the separate Run now button is gone");
+assert.equal(/Sync Done to YouTube/.test(ext("popup.html")), false, "the separate Sync Done button is gone");
 const popup = ext("popup.js");
-assert.match(popup, /AUTO_RUN_NOW/);
+assert.equal(/AUTO_RUN_NOW/.test(popup), false);
 assert.match(popup, /describeAutoStatus/, "the popup shows the scheduling status, not just the last run");
 assert.match(popup, /hasSecret/);
+assert.match(popup, /resolveMarkDoneSetting/, "existing autoDoneEnabled is migrated");
+assert.match(popup, /Marking \$\{markingCount\} watched/);
 
 console.log("auto-sync tests: 20 h catch-up, fresh/disabled/no-secret/running, force, 2 h + 20 h failure backoff, partial-not-success + partial streak cap, skip-reason records, nextDueAt agrees with shouldRunAuto, clock skew, state folding, popup status text, alarm/startup/tab-reload wiring ok");
